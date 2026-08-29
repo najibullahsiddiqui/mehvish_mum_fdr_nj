@@ -3,8 +3,9 @@ import path from "node:path";
 import { ProviderConfigurationError } from "@/lib/providers/errors";
 
 const SEGMENT_PATTERN = /[^a-zA-Z0-9._-]+/g;
+export type MediaEnv = Record<string, string | undefined>;
 
-export function getMediaRoot(env: NodeJS.ProcessEnv = process.env) {
+export function getMediaRoot(env: MediaEnv = process.env) {
   return path.resolve(env.MEDIA_ROOT?.trim() || "outputs");
 }
 
@@ -13,7 +14,7 @@ export function safeMediaSegment(value: string, fallback = "item") {
   return cleaned || fallback;
 }
 
-export function resolveMediaPath(parts: string[], env: NodeJS.ProcessEnv = process.env) {
+export function resolveMediaPath(parts: string[], env: MediaEnv = process.env) {
   const root = getMediaRoot(env);
   const target = path.resolve(root, ...parts.map((part) => safeMediaSegment(part)));
   if (target !== root && !target.startsWith(`${root}${path.sep}`)) {
@@ -22,7 +23,7 @@ export function resolveMediaPath(parts: string[], env: NodeJS.ProcessEnv = proce
   return target;
 }
 
-export function episodeMediaDirectory(seriesSlug: string, episodeCode: string, category: string, env: NodeJS.ProcessEnv = process.env) {
+export function episodeMediaDirectory(seriesSlug: string, episodeCode: string, category: string, env: MediaEnv = process.env) {
   return resolveMediaPath(["random-rooms", seriesSlug, "episodes", episodeCode, category], env);
 }
 
@@ -30,7 +31,7 @@ export async function ensureEpisodeMediaDirectory(
   seriesSlug: string,
   episodeCode: string,
   category: string,
-  env: NodeJS.ProcessEnv = process.env,
+  env: MediaEnv = process.env,
 ) {
   const directory = episodeMediaDirectory(seriesSlug, episodeCode, category, env);
   await mkdir(directory, { recursive: true });
