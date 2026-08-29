@@ -78,11 +78,10 @@ export async function renderEpisode(episodeId: string) {
     })),
   }));
 
-  if (missingShots.length) {
-    throw new HttpError(`Generate and sync local video assets first: ${missingShots.join(", ")}.`, 422);
-  }
+  if (missingShots.length) throw new HttpError(`Generate and sync local video assets first: ${missingShots.join(", ")}.`, 422);
 
   const timeline = buildRenderTimeline(scenes);
+  if (!timeline.videoPaths.length) throw new HttpError("Episode has no shot video clips to render.", 422);
   for (const videoPath of timeline.videoPaths) await ensureFile(videoPath, "Video clip");
   for (const voice of timeline.voices) await ensureFile(voice.localPath, "Voice asset");
 
@@ -90,14 +89,18 @@ export async function renderEpisode(episodeId: string) {
   await mkdir(renderDir, { recursive: true });
   const concatPath = path.join(renderDir, "shots.ffconcat");
   const subtitlesPath = path.join(renderDir, "captions.srt");
-  const outputPath = path.join(renderDir, `${safeMediaSegment(episode.code)}-final.mp4`);
+  const outputPath = path.join(renderDir, `${safeMediaSegment(episode.code)}-final-${Date.now()}.mp4`);
   await writeFile(concatPath, ffconcatContent(timeline.videoPaths), "utf8");
-  await writeFile(subtitlesPath, captionsToSrt(timeline.captions), "utf8");
+  if (timeline.captions.length) await writeFile(subtitlesPath, captionsToSrt(timeline.captions), "utf8");
 
   const args = ["-y", "-f", "concat", "-safe", "0", "-i", concatPath];
   for (const voice of timeline.voices) args.push("-i", voice.localPath);
 
-  const videoFilters = `scale=${config.width}:${config.height}:force_original_aspect_ratio=increase,crop=${config.width}:${config.height},fps=${config.fps},subtitles='${subtitleFilterPath(subtitlesPath)}':force_style='Alignment=2,FontSize=18,Outline=2,Shadow=1,MarginV=110'`;
+  const baseVideoFilters = `scale=${config.width}:${config.height}:force_original_aspect_ratio=increase,crop=${config.width}:${config.height},fps=${config.fps}`;
+  const videoFilters = timeline.captions.length
+    ? `${baseVideoFilters},subtitles='${subtitleFilterPath(subtitlesPath)}':force_style='Alignment=2,FontSize=18,Outline=2,Shadow=1,MarginV=110'`
+    : baseVideoFilters;
+
   if (timeline.voices.length) {
     const audioParts = timeline.voices.map((voice, index) => `[${index + 1}:a]adelay=${Math.round(voice.startMs)}|${Math.round(voice.startMs)}[a${index}]`);
     const mixInputs = timeline.voices.map((_, index) => `[a${index}]`).join("");
@@ -105,7 +108,9 @@ export async function renderEpisode(episodeId: string) {
   } else {
     args.push("-filter_complex", `[0:v]${videoFilters}[vout]`, "-map", "[vout]", "-an");
   }
-  args.push("-c:v", "libx264", "-preset", config.preset, "-crf", String(config.videoCrf), "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-shortest", outputPath);
+  args.push("-c:v", "libx264", "-preset", config.preset, "-crf", String(config.videoCrf), "-pix_fmt", "yuv420p");
+  if (timeline.voices.length) args.push("-c:a", "aac", "-b:a", "192k");
+  args.push("-movflags", "+faststart", outputPath);
 
   const job = await prisma.generationJob.create({
     data: {
