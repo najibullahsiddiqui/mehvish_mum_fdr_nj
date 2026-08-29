@@ -1,6 +1,8 @@
 import { ProviderConfigurationError, ProviderCostGuardError } from "@/lib/providers/errors";
 import type { RunPodConfig } from "@/lib/runpod/types";
 
+export type RunPodEnv = Record<string, string | undefined>;
+
 function boolFromEnv(value: string | undefined, fallback: boolean) {
   if (!value?.trim()) return fallback;
   const normalized = value.trim().toLowerCase();
@@ -32,7 +34,7 @@ function cleanBaseUrl(value: string | undefined) {
   return raw.replace(/\/+$/, "");
 }
 
-export function getRunPodConfig(env: NodeJS.ProcessEnv = process.env): RunPodConfig {
+export function getRunPodConfig(env: RunPodEnv = process.env): RunPodConfig {
   return {
     enabled: boolFromEnv(env.RUNPOD_ENABLED, false),
     apiKey: env.RUNPOD_API_KEY?.trim() || null,
