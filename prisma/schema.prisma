@@ -1,0 +1,448 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum IdeaStatus {
+  raw_idea
+  shortlisted
+  researching
+  script_ready
+  recording
+  editing
+  uploaded
+  analyzed
+}
+
+enum ProjectStatus {
+  planning
+  researching
+  scripting
+  thumbnail
+  upload_pack
+  recording
+  editing
+  uploaded
+  analyzed
+  archived
+}
+
+enum ScriptType {
+  long_form
+  shorts
+  faceless_voiceover
+  screen_recording_tutorial
+}
+
+model ChannelProfile {
+  id                 String   @id @default(cuid())
+  name               String
+  niche              String
+  audience           String
+  language           String
+  tone               String
+  videoStyle         String
+  contentPillars     String[]
+  ctaStyle           String
+  doNotSay           String[]
+  competitorChannels String[]
+  monetizationGoal   String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model RandomRoomsSeries {
+  id                 String                  @id @default(cuid())
+  name               String                  @default("Random Rooms")
+  slug               String                  @unique @default("random-rooms")
+  concept            String                  @default("")
+  tone               String                  @default("")
+  language           String                  @default("hinglish")
+  targetFormat       String                  @default("youtube_shorts")
+  defaultDurationSec Int                     @default(60)
+  contentRules       String[]                @default([])
+  active             Boolean                 @default(true)
+  characters         Character[]
+  relationships      CharacterRelationship[]
+  rooms              RoomProfile[]
+  episodes           Episode[]
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  @@index([active])
+  @@index([slug])
+}
+
+model Character {
+  id                  String                  @id @default(cuid())
+  seriesId            String
+  series              RandomRoomsSeries       @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  code                String
+  name                String
+  role                String
+  characterType       String
+  personality         String[]                @default([])
+  speakingStyle       String[]                @default([])
+  catchphrases        String[]                @default([])
+  doNotSay            String[]                @default([])
+  visualDescription   String
+  signatureTraits     String[]                @default([])
+  voiceProfile        Json?
+  continuityNotes     String?
+  referenceAssetNotes String?
+  active              Boolean                 @default(true)
+  relationshipsAsA    CharacterRelationship[] @relation("CharacterA")
+  relationshipsAsB    CharacterRelationship[] @relation("CharacterB")
+  episodeAssignments  EpisodeCharacter[]
+  dialogueLines       DialogueLine[]
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+
+  @@unique([seriesId, code])
+  @@index([seriesId])
+  @@index([code])
+  @@index([active])
+}
+
+model CharacterRelationship {
+  id               String            @id @default(cuid())
+  seriesId         String
+  series           RandomRoomsSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  characterAId     String
+  characterA       Character         @relation("CharacterA", fields: [characterAId], references: [id], onDelete: Cascade)
+  characterBId     String
+  characterB       Character         @relation("CharacterB", fields: [characterBId], references: [id], onDelete: Cascade)
+  pairKey          String
+  relationshipType String
+  dynamic          String
+  conflictPattern  String
+  comedyPattern    String
+  continuityNotes  String?
+  active           Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@unique([seriesId, pairKey])
+  @@index([seriesId])
+  @@index([characterAId])
+  @@index([characterBId])
+  @@index([active])
+}
+
+model RoomProfile {
+  id                  String            @id @default(cuid())
+  seriesId            String
+  series              RandomRoomsSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  code                String
+  name                String
+  roomType            String
+  description         String
+  visualStyle         String
+  lighting            String
+  colorMood           String
+  cameraConstraints   String[]          @default([])
+  props               String[]          @default([])
+  environmentRules    String[]          @default([])
+  continuityNotes     String?
+  referenceAssetNotes String?
+  active              Boolean           @default(true)
+  scenes              Scene[]
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  @@unique([seriesId, code])
+  @@index([seriesId])
+  @@index([code])
+  @@index([active])
+}
+
+model Episode {
+  id                   String             @id @default(cuid())
+  seriesId             String
+  series               RandomRoomsSeries  @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  episodeNumber        Int
+  code                 String
+  title                String
+  premise              String
+  hook                 String             @default("")
+  comedyAngle          String             @default("")
+  targetDurationSec    Int                @default(30)
+  targetAspectRatio    String             @default("9:16")
+  language             String             @default("hinglish")
+  status               String             @default("DRAFT")
+  notes                String?
+  characterAssignments EpisodeCharacter[]
+  scenes               Scene[]
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@unique([seriesId, episodeNumber])
+  @@unique([seriesId, code])
+  @@index([seriesId])
+  @@index([code])
+  @@index([status])
+}
+
+model EpisodeCharacter {
+  id            String    @id @default(cuid())
+  episodeId     String
+  episode       Episode   @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  characterId   String
+  character     Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  roleInEpisode String
+  priority      Int       @default(1)
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([episodeId, characterId])
+  @@index([episodeId])
+  @@index([characterId])
+}
+
+model Scene {
+  id            String         @id @default(cuid())
+  episodeId     String
+  episode       Episode        @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  sceneNumber   Int
+  roomId        String?
+  room          RoomProfile?   @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  title         String
+  summary       String
+  purpose       String
+  beat          String
+  durationSec   Int            @default(8)
+  status        String         @default("DRAFT")
+  notes         String?
+  shots         Shot[]
+  dialogueLines DialogueLine[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@unique([episodeId, sceneNumber])
+  @@index([episodeId])
+  @@index([roomId])
+  @@index([status])
+}
+
+model Shot {
+  id                String         @id @default(cuid())
+  sceneId           String
+  scene             Scene          @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  shotNumber        Int
+  shotType          String
+  cameraFraming     String
+  cameraMovement    String
+  actionDescription String
+  visualDescription String
+  imagePrompt       String
+  videoPrompt       String
+  durationSec       Int            @default(3)
+  emotion           String
+  continuityNotes   String?
+  status            String         @default("DRAFT")
+  dialogueLines     DialogueLine[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@unique([sceneId, shotNumber])
+  @@index([sceneId])
+  @@index([status])
+}
+
+model DialogueLine {
+  id                 String    @id @default(cuid())
+  sceneId            String
+  scene              Scene     @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  shotId             String?
+  shot               Shot?     @relation(fields: [shotId], references: [id], onDelete: SetNull)
+  characterId        String
+  character          Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  lineNumber         Int
+  text               String
+  emotion            String?
+  deliveryStyle      String?
+  captionText        String
+  startOffsetMs      Int?
+  durationEstimateMs Int?
+  notes              String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([sceneId, lineNumber])
+  @@index([sceneId])
+  @@index([shotId])
+  @@index([characterId])
+}
+
+model Idea {
+  id           String        @id @default(cuid())
+  idea         String
+  pillar       String
+  audiencePain String
+  videoType    String
+  priority     Int           @default(3)
+  status       IdeaStatus    @default(raw_idea)
+  notes        String?
+  project      VideoProject?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([status])
+  @@index([pillar])
+}
+
+model VideoProject {
+  id                 String             @id @default(cuid())
+  ideaId             String?            @unique
+  idea               Idea?              @relation(fields: [ideaId], references: [id], onDelete: SetNull)
+  topic              String
+  pillar             String
+  videoType          String
+  targetLength       String
+  language           String
+  status             ProjectStatus      @default(planning)
+  notes              String?
+  researchBriefs     ResearchBrief[]
+  scripts            ScriptVersion[]
+  thumbnailPacks     ThumbnailPack[]
+  uploadPacks        UploadPack[]
+  performanceEntries PerformanceEntry[]
+  generationLogs     GenerationLog[]
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([status])
+  @@index([pillar])
+}
+
+model ResearchBrief {
+  id              String       @id @default(cuid())
+  projectId       String
+  project         VideoProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  topic           String
+  referenceLinks  String[]
+  viewerPain      String
+  videoPromise    String
+  mainPoints      String[]
+  examples        String[]
+  commonMistakes  String[]
+  contrarianAngle String
+  hookAngles      String[]
+  titleAngles     String[]
+  rawOutput       Json?
+  createdAt       DateTime     @default(now())
+
+  @@index([projectId])
+}
+
+model ScriptVersion {
+  id               String       @id @default(cuid())
+  projectId        String
+  project          VideoProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  scriptType       ScriptType
+  versionName      String
+  hook             String
+  intro            String
+  body             String
+  cta              String
+  outro            String
+  visualNotes      String[]
+  onScreenText     String[]
+  contentMarkdown  String
+  structuredOutput Json?
+  createdAt        DateTime     @default(now())
+
+  @@index([projectId])
+  @@index([scriptType])
+}
+
+model ThumbnailPack {
+  id                     String       @id @default(cuid())
+  projectId              String
+  project                VideoProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  textOptions            String[]
+  visualConcepts         String[]
+  emotionAngle           String
+  imageGenerationPrompts String[]
+  canvaInstructions      String
+  photoshopInstructions  String
+  rawOutput              Json?
+  createdAt              DateTime     @default(now())
+
+  @@index([projectId])
+}
+
+model UploadPack {
+  id                 String       @id @default(cuid())
+  projectId          String
+  project            VideoProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  titleOptions       String[]
+  finalTitle         String
+  description        String
+  tags               String[]
+  hashtags           String[]
+  chapters           String[]
+  pinnedComment      String
+  communityPost      String
+  shortsCutdownIdeas String[]
+  uploadChecklist    String[]
+  rawOutput          Json?
+  createdAt          DateTime     @default(now())
+
+  @@index([projectId])
+}
+
+model PerformanceEntry {
+  id               String       @id @default(cuid())
+  projectId        String
+  project          VideoProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  publishDate      DateTime
+  views24h         Int?
+  views7d          Int?
+  ctr              Float?
+  avgViewDuration  String?
+  subscriberGain   Int?
+  commentsSummary  String?
+  whatWorked       String?
+  whatFailed       String?
+  improvementNotes String[]
+  nextVideoIdeas   String[]
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([projectId])
+  @@index([publishDate])
+}
+
+model GenerationLog {
+  id           String        @id @default(cuid())
+  featureName  String
+  provider     String
+  providerId   String?
+  providerKind String?
+  model        String
+  status       String        @default("SUCCESS")
+  attemptCount Int?
+  errorCode    String?
+  errorMessage String?
+  inputTokens  Int?
+  outputTokens Int?
+  costEstimate Float?
+  durationMs   Int?
+  projectId    String?
+  project      VideoProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdAt    DateTime      @default(now())
+
+  @@index([featureName])
+  @@index([providerId])
+  @@index([providerKind])
+  @@index([status])
+  @@index([errorCode])
+  @@index([projectId])
+  @@index([createdAt])
+}

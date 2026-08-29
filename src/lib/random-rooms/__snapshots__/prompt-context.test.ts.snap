@@ -1,0 +1,44 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`random rooms prompt context > builds deterministic character context without AI 1`] = `
+"Character: Rex
+
+Code: REX
+
+Role: Lead chaos-maker
+
+Type: robot
+
+Personality:
+- overconfident
+- dramatic
+
+Speaking Style:
+- pseudo-technical
+- theatrical
+
+Catchphrases:
+- Obviously this is under control.
+
+Rules:
+- Do not say: I was wrong
+
+Visual Identity:
+Compact rounded robot with expressive LED eyes and a red hoodie.
+
+Signature Traits:
+- LED eyes
+- red hoodie
+
+Voice Profile Metadata:
+- Provider hint: future-local-tts
+- Voice ID: rex-demo
+- Style: confident and theatrical
+- Notes: Metadata only.
+
+Continuity Notes:
+Rex rarely admits mistakes.
+
+Reference Asset Notes:
+Keep proportions consistent."
+`;
