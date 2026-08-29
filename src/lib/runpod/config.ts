@@ -1,5 +1,13 @@
-import { ProviderConfigurationError } from "@/lib/providers/errors";
+import { ProviderConfigurationError, ProviderCostGuardError } from "@/lib/providers/errors";
 import type { RunPodConfig } from "@/lib/runpod/types";
+
+function boolFromEnv(value: string | undefined, fallback: boolean) {
+  if (!value?.trim()) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  throw new ProviderConfigurationError(`Invalid boolean configuration: ${value}.`);
+}
 
 function intFromEnv(value: string | undefined, fallback: number, min: number, max: number) {
   if (!value?.trim()) return fallback;
@@ -26,10 +34,12 @@ function cleanBaseUrl(value: string | undefined) {
 
 export function getRunPodConfig(env: NodeJS.ProcessEnv = process.env): RunPodConfig {
   return {
+    enabled: boolFromEnv(env.RUNPOD_ENABLED, false),
     apiKey: env.RUNPOD_API_KEY?.trim() || null,
     baseUrl: cleanBaseUrl(env.RUNPOD_BASE_URL),
     videoEndpointId: env.RUNPOD_VIDEO_ENDPOINT_ID?.trim() || null,
     imageEndpointId: env.RUNPOD_IMAGE_ENDPOINT_ID?.trim() || null,
+    videoModel: env.RUNPOD_VIDEO_MODEL?.trim() || null,
     requestTimeoutMs: intFromEnv(env.RUNPOD_REQUEST_TIMEOUT_MS, 15_000, 1_000, 120_000),
     executionTimeoutMs: intFromEnv(env.RUNPOD_EXECUTION_TIMEOUT_MS, 900_000, 5_000, 604_800_000),
     jobTtlMs: intFromEnv(env.RUNPOD_JOB_TTL_MS, 3_600_000, 10_000, 604_800_000),
@@ -37,6 +47,9 @@ export function getRunPodConfig(env: NodeJS.ProcessEnv = process.env): RunPodCon
 }
 
 export function assertRunPodConfigured(config: RunPodConfig, endpointId?: string | null) {
+  if (!config.enabled) {
+    throw new ProviderCostGuardError("RunPod execution is disabled. Set RUNPOD_ENABLED=true only when GPU usage is intended.");
+  }
   if (!config.apiKey) {
     throw new ProviderConfigurationError("RUNPOD_API_KEY is not configured.");
   }
