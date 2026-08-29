@@ -70,6 +70,8 @@ model RandomRoomsSeries {
   relationships      CharacterRelationship[]
   rooms              RoomProfile[]
   episodes           Episode[]
+  mediaAssets        MediaAsset[]
+  generationJobs     GenerationJob[]
   createdAt          DateTime                @default(now())
   updatedAt          DateTime                @updatedAt
 
@@ -99,6 +101,8 @@ model Character {
   relationshipsAsB    CharacterRelationship[] @relation("CharacterB")
   episodeAssignments  EpisodeCharacter[]
   dialogueLines       DialogueLine[]
+  mediaAssets         MediaAsset[]
+  generationJobs      GenerationJob[]
   createdAt           DateTime                @default(now())
   updatedAt           DateTime                @updatedAt
 
@@ -151,6 +155,8 @@ model RoomProfile {
   referenceAssetNotes String?
   active              Boolean           @default(true)
   scenes              Scene[]
+  mediaAssets         MediaAsset[]
+  generationJobs      GenerationJob[]
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 
@@ -177,6 +183,8 @@ model Episode {
   notes                String?
   characterAssignments EpisodeCharacter[]
   scenes               Scene[]
+  mediaAssets          MediaAsset[]
+  generationJobs       GenerationJob[]
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
@@ -205,23 +213,25 @@ model EpisodeCharacter {
 }
 
 model Scene {
-  id            String         @id @default(cuid())
-  episodeId     String
-  episode       Episode        @relation(fields: [episodeId], references: [id], onDelete: Cascade)
-  sceneNumber   Int
-  roomId        String?
-  room          RoomProfile?   @relation(fields: [roomId], references: [id], onDelete: SetNull)
-  title         String
-  summary       String
-  purpose       String
-  beat          String
-  durationSec   Int            @default(8)
-  status        String         @default("DRAFT")
-  notes         String?
-  shots         Shot[]
-  dialogueLines DialogueLine[]
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id             String         @id @default(cuid())
+  episodeId      String
+  episode        Episode        @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  sceneNumber    Int
+  roomId         String?
+  room           RoomProfile?   @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  title          String
+  summary        String
+  purpose        String
+  beat           String
+  durationSec    Int            @default(8)
+  status         String         @default("DRAFT")
+  notes          String?
+  shots          Shot[]
+  dialogueLines  DialogueLine[]
+  mediaAssets    MediaAsset[]
+  generationJobs GenerationJob[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   @@unique([episodeId, sceneNumber])
   @@index([episodeId])
@@ -246,6 +256,8 @@ model Shot {
   continuityNotes   String?
   status            String         @default("DRAFT")
   dialogueLines     DialogueLine[]
+  mediaAssets       MediaAsset[]
+  generationJobs    GenerationJob[]
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
@@ -255,13 +267,13 @@ model Shot {
 }
 
 model DialogueLine {
-  id                 String    @id @default(cuid())
+  id                 String          @id @default(cuid())
   sceneId            String
-  scene              Scene     @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  scene              Scene           @relation(fields: [sceneId], references: [id], onDelete: Cascade)
   shotId             String?
-  shot               Shot?     @relation(fields: [shotId], references: [id], onDelete: SetNull)
+  shot               Shot?           @relation(fields: [shotId], references: [id], onDelete: SetNull)
   characterId        String
-  character          Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  character          Character       @relation(fields: [characterId], references: [id], onDelete: Cascade)
   lineNumber         Int
   text               String
   emotion            String?
@@ -270,13 +282,105 @@ model DialogueLine {
   startOffsetMs      Int?
   durationEstimateMs Int?
   notes              String?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  mediaAssets        MediaAsset[]
+  generationJobs     GenerationJob[]
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
 
   @@unique([sceneId, lineNumber])
   @@index([sceneId])
   @@index([shotId])
   @@index([characterId])
+}
+
+model MediaAsset {
+  id             String            @id @default(cuid())
+  seriesId       String
+  series         RandomRoomsSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  episodeId      String?
+  episode        Episode?          @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  sceneId        String?
+  scene          Scene?            @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  shotId         String?
+  shot           Shot?             @relation(fields: [shotId], references: [id], onDelete: Cascade)
+  dialogueLineId String?
+  dialogueLine   DialogueLine?     @relation(fields: [dialogueLineId], references: [id], onDelete: Cascade)
+  characterId    String?
+  character      Character?        @relation(fields: [characterId], references: [id], onDelete: SetNull)
+  roomId         String?
+  room           RoomProfile?      @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  assetType      String
+  status         String            @default("READY")
+  provider       String?
+  providerJobId  String?
+  model          String?
+  localPath      String?
+  remoteUrl      String?
+  mimeType       String?
+  durationSec    Float?
+  width          Int?
+  height         Int?
+  checksum       String?
+  metadata       Json?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([seriesId])
+  @@index([episodeId])
+  @@index([sceneId])
+  @@index([shotId])
+  @@index([dialogueLineId])
+  @@index([characterId])
+  @@index([roomId])
+  @@index([assetType])
+  @@index([status])
+  @@index([providerJobId])
+}
+
+model GenerationJob {
+  id             String            @id @default(cuid())
+  seriesId       String
+  series         RandomRoomsSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  episodeId      String?
+  episode        Episode?          @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  sceneId        String?
+  scene          Scene?            @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  shotId         String?
+  shot           Shot?             @relation(fields: [shotId], references: [id], onDelete: Cascade)
+  dialogueLineId String?
+  dialogueLine   DialogueLine?     @relation(fields: [dialogueLineId], references: [id], onDelete: Cascade)
+  characterId    String?
+  character      Character?        @relation(fields: [characterId], references: [id], onDelete: SetNull)
+  roomId         String?
+  room           RoomProfile?      @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  jobType        String
+  provider       String
+  providerJobId  String?
+  model          String?
+  status         String            @default("CREATED")
+  input          Json
+  output         Json?
+  errorCode      String?
+  errorMessage   String?
+  retries        Int               @default(0)
+  costEstimate   Float?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([seriesId])
+  @@index([episodeId])
+  @@index([sceneId])
+  @@index([shotId])
+  @@index([dialogueLineId])
+  @@index([characterId])
+  @@index([roomId])
+  @@index([jobType])
+  @@index([provider])
+  @@index([providerJobId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model Idea {
