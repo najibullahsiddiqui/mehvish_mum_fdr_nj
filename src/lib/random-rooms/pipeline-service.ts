@@ -140,7 +140,9 @@ export async function advanceEpisodePipeline(episodeId: string) {
   const runPod = getRunPodConfig();
   for (const shot of episode.scenes.flatMap((scene) => scene.shots)) {
     const hasImage = shot.mediaAssets.some((asset) => asset.assetType === "IMAGE_KEYFRAME" && isReadyAsset(asset));
-    const hasVideo = shot.mediaAssets.some((asset) => asset.assetType === "VIDEO_CLIP" && isReadyAsset(asset) && !!asset.localPath);
+    const readyVideoAssets = shot.mediaAssets.filter((asset) => asset.assetType === "VIDEO_CLIP" && isReadyAsset(asset));
+    const hasVideo = readyVideoAssets.some((asset) => !!asset.localPath);
+    const hasRemoteOnlyVideo = !hasVideo && readyVideoAssets.length > 0;
     const activeImage = shot.generationJobs.some((job) => job.jobType === "IMAGE" && isActiveJob(job));
     const activeVideo = shot.generationJobs.some((job) => job.jobType === "VIDEO" && isActiveJob(job));
 
@@ -155,6 +157,11 @@ export async function advanceEpisodePipeline(episodeId: string) {
       } catch (error) {
         blocked.push(error instanceof Error ? error.message : "Image generation failed.");
       }
+      continue;
+    }
+
+    if (hasRemoteOnlyVideo) {
+      blocked.push(`Shot ${shot.id} has a completed remote video but no local file. Resolve the media download before generating another paid clip.`);
       continue;
     }
 
