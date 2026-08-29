@@ -17,6 +17,7 @@ export type RunPodConfig = {
   videoEndpointId: string | null;
   imageEndpointId: string | null;
   videoModel: string | null;
+  imageModel: string | null;
   requestTimeoutMs: number;
   executionTimeoutMs: number;
   jobTtlMs: number;
@@ -74,6 +75,7 @@ export type RunPodStatusSnapshot = {
   videoEndpointId: string | null;
   imageEndpointId: string | null;
   videoModel: string | null;
+  imageModel: string | null;
   requestTimeoutMs: number;
   message?: string;
   health?: RunPodHealthResponse | null;
