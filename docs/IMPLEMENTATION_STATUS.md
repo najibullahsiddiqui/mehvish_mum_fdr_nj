@@ -32,7 +32,7 @@ Status: COMPLETE
 
 ## Phase 8 — Final Renderer
 
-Status: IMPLEMENTED; CI validation required before merge
+Status: COMPLETE
 
 - Added deterministic episode render timeline with shot ordering, global dialogue timing, caption cues, and voice timing.
 - Added FFconcat and SRT builders with focused unit tests.
@@ -44,6 +44,18 @@ Status: IMPLEMENTED; CI validation required before merge
 - Added safe local media streaming endpoint for browser preview.
 - Added **Render Studio** UI with renderer readiness, per-episode render/re-render, final video preview, and final video gallery.
 - No RunPod/GPU/paid AI call is required by Phase 8 CI.
+
+### Phase 8 verification
+
+GitHub Actions CI passed on the Phase 8 pull request:
+
+- `npm ci`: PASS
+- `npm run prisma:generate`: PASS
+- `npx prisma validate`: PASS
+- `npm run lint`: PASS
+- `npm run typecheck`: PASS
+- `npm test`: PASS — 29 files / 105 tests
+- `npm run build`: PASS
 
 ## Current Production Chain
 
