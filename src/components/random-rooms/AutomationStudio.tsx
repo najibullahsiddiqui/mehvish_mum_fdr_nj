@@ -68,7 +68,10 @@ export function AutomationStudio(props: { randomRooms: DashboardData["randomRoom
     }
   }, [episodeId, busy]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
   useEffect(() => {
     if (!autoRun) return;
     const timer = window.setInterval(() => void advance(), 8000);
