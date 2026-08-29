@@ -1,21 +1,23 @@
 "use client";
 
-import { Bot, Clapperboard, DoorOpen, Film, Sparkles, Users } from "lucide-react";
+import { Bot, Clapperboard, DoorOpen, Film, Sparkles, Users, Video } from "lucide-react";
 import { useState } from "react";
 import { CharacterStudio } from "@/components/random-rooms/CharacterStudio";
 import { EpisodeStudio } from "@/components/random-rooms/EpisodeStudio";
 import { ProductionStudio } from "@/components/random-rooms/ProductionStudio";
+import { RenderStudio } from "@/components/random-rooms/RenderStudio";
 import { RoomStudio } from "@/components/random-rooms/RoomStudio";
 import type { DashboardData } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-type StudioTab = "characters" | "rooms" | "episodes" | "production";
+type StudioTab = "characters" | "rooms" | "episodes" | "production" | "render";
 
 const tabs: Array<{ key: StudioTab; label: string; shortLabel: string; icon: typeof Users }> = [
   { key: "characters", label: "Character Studio", shortLabel: "Characters", icon: Users },
   { key: "rooms", label: "Room Studio", shortLabel: "Rooms", icon: DoorOpen },
   { key: "episodes", label: "Episode Studio", shortLabel: "Episodes", icon: Clapperboard },
   { key: "production", label: "Production Studio", shortLabel: "Production", icon: Film },
+  { key: "render", label: "Render Studio", shortLabel: "Render", icon: Video },
 ];
 
 export function RandomRoomsStudio(props: { randomRooms: DashboardData["randomRooms"]; onRefresh: () => Promise<void> }) {
@@ -36,7 +38,7 @@ export function RandomRoomsStudio(props: { randomRooms: DashboardData["randomRoo
             <h2 className="flex items-center gap-2 text-2xl font-black tracking-tight">
               <Bot className="h-6 w-6 text-fuchsia-300" /> Random Rooms
             </h2>
-            <p className="mt-1 text-sm font-medium text-stone-300">Recurring characters → rooms → episodes → GPU production.</p>
+            <p className="mt-1 text-sm font-medium text-stone-300">Characters → rooms → episodes → GPU production → final vertical video.</p>
           </div>
           <div className="grid grid-cols-3 gap-2 text-center">
             {[["Characters", characterCount], ["Rooms", roomCount], ["Episodes", episodeCount]].map(([label, value]) => (
@@ -78,8 +80,10 @@ export function RandomRoomsStudio(props: { randomRooms: DashboardData["randomRoo
         <RoomStudio randomRooms={props.randomRooms} onRefresh={props.onRefresh} />
       ) : activeTab === "episodes" ? (
         <EpisodeStudio randomRooms={props.randomRooms} onRefresh={props.onRefresh} />
-      ) : (
+      ) : activeTab === "production" ? (
         <ProductionStudio randomRooms={props.randomRooms} />
+      ) : (
+        <RenderStudio randomRooms={props.randomRooms} />
       )}
     </section>
   );
