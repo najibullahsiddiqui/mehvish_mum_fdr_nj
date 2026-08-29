@@ -8,5 +8,6 @@ src/generated
 out
 dist
 coverage
+outputs
 *.log
 !.env.example
