@@ -10,6 +10,7 @@ import { assertRenderConfigured, getRenderConfig } from "@/lib/render/config";
 import { buildRenderTimeline, captionsToSrt, ffconcatContent } from "@/lib/render/plan";
 
 const execFileAsync = promisify(execFile);
+const RENDERABLE_ASSET_STATUSES = ["READY", "APPROVED"];
 
 function subtitleFilterPath(filePath: string) {
   return filePath.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
@@ -49,8 +50,8 @@ export async function renderEpisode(episodeId: string) {
       scenes: {
         orderBy: { sceneNumber: "asc" },
         include: {
-          shots: { orderBy: { shotNumber: "asc" }, include: { mediaAssets: { where: { assetType: "VIDEO_CLIP", status: "READY" }, orderBy: { createdAt: "desc" } } } },
-          dialogueLines: { orderBy: { lineNumber: "asc" }, include: { mediaAssets: { where: { assetType: "VOICE", status: "READY" }, orderBy: { createdAt: "desc" } } } },
+          shots: { orderBy: { shotNumber: "asc" }, include: { mediaAssets: { where: { assetType: "VIDEO_CLIP", status: { in: RENDERABLE_ASSET_STATUSES } }, orderBy: { createdAt: "desc" } } } },
+          dialogueLines: { orderBy: { lineNumber: "asc" }, include: { mediaAssets: { where: { assetType: "VOICE_AUDIO", status: { in: RENDERABLE_ASSET_STATUSES } }, orderBy: { createdAt: "desc" } } } },
         },
       },
     },
@@ -157,7 +158,7 @@ export async function renderEpisode(episodeId: string) {
 
 export async function resolveLocalMediaAsset(assetId: string) {
   const asset = await prisma.mediaAsset.findUnique({ where: { id: assetId } });
-  if (!asset?.localPath || asset.status !== "READY") throw new HttpError("Media asset is not available locally.", 404);
+  if (!asset?.localPath || !RENDERABLE_ASSET_STATUSES.includes(asset.status)) throw new HttpError("Media asset is not available locally.", 404);
   const root = getMediaRoot();
   const resolved = path.resolve(asset.localPath);
   const relative = path.relative(root, resolved);
