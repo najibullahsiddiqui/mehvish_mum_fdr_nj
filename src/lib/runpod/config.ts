@@ -42,6 +42,7 @@ export function getRunPodConfig(env: RunPodEnv = process.env): RunPodConfig {
     videoEndpointId: env.RUNPOD_VIDEO_ENDPOINT_ID?.trim() || null,
     imageEndpointId: env.RUNPOD_IMAGE_ENDPOINT_ID?.trim() || null,
     videoModel: env.RUNPOD_VIDEO_MODEL?.trim() || null,
+    imageModel: env.RUNPOD_IMAGE_MODEL?.trim() || null,
     requestTimeoutMs: intFromEnv(env.RUNPOD_REQUEST_TIMEOUT_MS, 15_000, 1_000, 120_000),
     executionTimeoutMs: intFromEnv(env.RUNPOD_EXECUTION_TIMEOUT_MS, 900_000, 5_000, 604_800_000),
     jobTtlMs: intFromEnv(env.RUNPOD_JOB_TTL_MS, 3_600_000, 10_000, 604_800_000),
