@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main, phase6-runpod-media-foundation]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/creatorpilot?schema=public
+      LLM_PROVIDER: mock
+      ALLOW_PAID_AI: "false"
+      ALLOW_CLOUD_AI: "false"
+      RUNPOD_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npx prisma validate
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
