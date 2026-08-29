@@ -10,8 +10,9 @@ Private personal web app for planning YouTube videos from idea to upload-ready p
 - Prisma
 - PostgreSQL
 - LLM provider architecture with Claude, Mock, Ollama, and Qwen boundary support
+- RunPod Serverless queue integration for GPU production
 - Markdown export
-- Random Rooms Character Studio, Room Studio, and Episode Studio planning/CRUD
+- Random Rooms Character Studio, Room Studio, Episode Studio, and Production Studio
 
 ## Setup
 
@@ -78,7 +79,7 @@ Open [http://localhost:3000](http://localhost:3000).
 - AI generations use the configured LLM provider. New setups default to `LLM_PROVIDER=mock` so local testing does not call paid/cloud AI.
 - Failed generations return normalized safe errors and are logged with `FAILED` status.
 - Performance metrics can be saved manually without calling AI. AI analysis can be run separately later.
-- Random Rooms Character Studio, Room Studio, and Episode Studio are planning-only. They do not generate images, audio, video, voice files, renders, workers, or publishing jobs.
+- Random Rooms planning remains deterministic. RunPod execution is separate and is disabled by default to prevent accidental GPU charges.
 
 ## Main Modules
 
@@ -94,6 +95,7 @@ Open [http://localhost:3000](http://localhost:3000).
 - Random Rooms Character Studio
 - Random Rooms Room Studio
 - Random Rooms Episode Studio
+- Random Rooms Production Studio
 
 ## Random Rooms Studios
 
@@ -109,9 +111,14 @@ Phase 3 through Phase 5 add local CRUD for recurring-character, room, and episod
 - `Shot`
 - `DialogueLine`
 
+Phase 6 adds production persistence:
+
+- `MediaAsset`
+- `GenerationJob`
+
 The seed creates one `Random Rooms` series, canonical characters `REX` and `GLITCH`, their reluctant-partners relationship, and starter rooms `REX_APARTMENT`, `AI_OFFICE`, and `GLITCH_LAB`. Episodes, scenes, shots, and dialogue can be planned manually. Optional episode-plan preview uses the configured LLM provider and defaults to the local mock provider in new setups.
 
-APIs:
+Core APIs:
 
 - `GET` and `POST /api/random-rooms/series`
 - `PATCH /api/random-rooms/series/[id]`
@@ -126,10 +133,51 @@ APIs:
 - `GET /api/random-rooms/episodes/[id]/manifest`
 - `POST /api/random-rooms/generate/episode-plan`
 - Scene, shot, dialogue, and episode-character assignment APIs under `/api/random-rooms`
+- `GET /api/random-rooms/production?seriesId=...`
+- `POST /api/random-rooms/production/jobs`
+- `POST /api/random-rooms/production/jobs/[id]/sync`
+- `GET /api/runpod/status`
+
+## RunPod GPU Production
+
+CreatorPilot uses RunPod Serverless as an asynchronous GPU execution layer. The backend submits jobs to `/run`, stores the returned provider job ID in `GenerationJob`, and later syncs state through `/status/{jobId}`. Completed output URLs are registered as `MediaAsset` records.
+
+RunPod is deliberately safe-off by default:
+
+```bash
+RUNPOD_ENABLED="false"
+RUNPOD_API_KEY=""
+RUNPOD_BASE_URL="https://api.runpod.ai/v2"
+RUNPOD_VIDEO_ENDPOINT_ID=""
+RUNPOD_IMAGE_ENDPOINT_ID=""
+RUNPOD_VIDEO_MODEL=""
+RUNPOD_REQUEST_TIMEOUT_MS="15000"
+RUNPOD_EXECUTION_TIMEOUT_MS="900000"
+RUNPOD_JOB_TTL_MS="3600000"
+MEDIA_ROOT="outputs"
+```
+
+To intentionally allow GPU jobs, configure a RunPod Serverless endpoint and then set:
+
+```bash
+RUNPOD_ENABLED="true"
+RUNPOD_API_KEY="..."
+RUNPOD_VIDEO_ENDPOINT_ID="..."
+```
+
+Important:
+
+- `RUNPOD_API_KEY` is server-only and must never be exposed to browser code.
+- `RUNPOD_ENABLED=false` blocks billable execution even when credentials are present.
+- Long-running video work uses asynchronous queue jobs instead of holding a web request open.
+- The Production Studio shows provider health, queued/running/completed jobs, shot submission controls, and completed assets.
+- `MEDIA_ROOT` defines the safe local output root for later downloaded/rendered assets.
+
+The current worker input contract sends the shot prompt, action/visual description, duration, aspect ratio, camera metadata, room continuity metadata, and internal IDs. The exact RunPod worker/model implementation can evolve without coupling UI code to the worker.
 
 ## AI Providers
 
-The provider architecture separates LLM contracts from future image, video, and TTS contracts. Current CreatorPilot generation routes use only the LLM provider contract.
+The provider architecture separates LLM contracts from image, video, and TTS contracts. Current CreatorPilot text generation routes use only the LLM provider contract.
 
 Current LLM providers:
 
@@ -150,10 +198,11 @@ AI_REQUEST_TIMEOUT_MS="60000"
 
 Cost safety:
 
-- `ALLOW_PAID_AI=false` blocks providers marked as potentially paid.
-- `ALLOW_CLOUD_AI=false` blocks cloud providers.
+- `ALLOW_PAID_AI=false` blocks LLM providers marked as potentially paid.
+- `ALLOW_CLOUD_AI=false` blocks cloud LLM providers.
 - `mock` and `ollama` are local/non-paid providers.
 - `claude` and `qwen` are cloud/potentially-paid providers and require explicit allowance.
+- RunPod has its own explicit `RUNPOD_ENABLED` guard because GPU execution has separate billing semantics.
 
 Claude:
 
@@ -194,6 +243,7 @@ Provider health:
 
 - Dashboard shows the active LLM provider, model, local/cloud status, configured state, guard state, and availability where known.
 - `GET /api/providers/status` returns the same safe status data without exposing API keys and without triggering generation.
+- `GET /api/runpod/status` returns safe RunPod endpoint/health metadata and never exposes the API key.
 
 AI should only be used for research, script, creative, and reasoning/generation tasks. Formatting, state transitions, timestamps, Markdown assembly, IDs, validation, and metadata normalization stay deterministic.
 
