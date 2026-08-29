@@ -11,10 +11,12 @@ export const RUNPOD_JOB_STATUSES = [
 export type RunPodJobStatus = (typeof RUNPOD_JOB_STATUSES)[number];
 
 export type RunPodConfig = {
+  enabled: boolean;
   apiKey: string | null;
   baseUrl: string;
   videoEndpointId: string | null;
   imageEndpointId: string | null;
+  videoModel: string | null;
   requestTimeoutMs: number;
   executionTimeoutMs: number;
   jobTtlMs: number;
@@ -63,6 +65,7 @@ export type RunPodHealthResponse = {
 };
 
 export type RunPodStatusSnapshot = {
+  enabled: boolean;
   configured: boolean;
   videoConfigured: boolean;
   imageConfigured: boolean;
@@ -70,6 +73,7 @@ export type RunPodStatusSnapshot = {
   baseUrl: string;
   videoEndpointId: string | null;
   imageEndpointId: string | null;
+  videoModel: string | null;
   requestTimeoutMs: number;
   message?: string;
   health?: RunPodHealthResponse | null;
