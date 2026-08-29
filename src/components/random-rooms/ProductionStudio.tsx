@@ -123,7 +123,10 @@ export function ProductionStudio(props: { randomRooms: DashboardData["randomRoom
   }, [series]);
 
   useEffect(() => {
-    void load();
+    const timer = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [load]);
 
   const stats = useMemo(() => {
@@ -185,7 +188,7 @@ export function ProductionStudio(props: { randomRooms: DashboardData["randomRoom
           <div className="rounded-xl border border-white/10 bg-white/5 p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 font-black"><ServerCog className="h-4 w-4" /> RunPod</div>
-              <span className={cn("rounded-full px-2 py-1 text-xs font-black", runPod?.available ? "bg-emerald-400/20 text-emerald-200" : runPod?.enabled ? "bg-amber-400/20 text-amber-200" : "bg-stone-700 text-stone-300")}> 
+              <span className={cn("rounded-full px-2 py-1 text-xs font-black", runPod?.available ? "bg-emerald-400/20 text-emerald-200" : runPod?.enabled ? "bg-amber-400/20 text-amber-200" : "bg-stone-700 text-stone-300")}>
                 {runPod?.available ? "CONNECTED" : runPod?.enabled ? "CONFIGURED" : "SAFE OFF"}
               </span>
             </div>
