@@ -2,71 +2,106 @@
 
 Last updated: 2026-08-29
 
-## Phases 1-5
+## Overall Status
+
+Phases 1-10 are implemented. CreatorPilot now contains the complete Random Rooms workflow from planning through production, final review, YouTube release, and analytics.
+
+## Phases 1-5 — Foundation + Planning
 
 Status: COMPLETE
 
-CreatorPilot stabilization, provider architecture, Random Rooms Character Studio, Room Studio, and Episode/Scene Planning Engine are complete. Planning includes series/characters/relationships/rooms, Episode + EpisodeCharacter + Scene + Shot + DialogueLine, deterministic production manifests, planning APIs, Episode Studio UI, and mock-safe optional episode-plan generation.
+- Stabilized the existing CreatorPilot application, PostgreSQL, tests, provider boundaries, and generation logging.
+- Added Random Rooms series, characters, relationships, rooms, episodes, scenes, shots, dialogue, structured planning manifests, and planning UI.
 
 ## Phase 6 — Media Foundation + RunPod
 
 Status: COMPLETE
 
-- Added `MediaAsset` and `GenerationJob` persistence with additive migration `20260829221500_random_rooms_media_foundation`.
-- Added safe local `MEDIA_ROOT` storage conventions.
-- Added RunPod Serverless async `/run`, status, cancel, and health client with `RUNPOD_ENABLED=false` safe-off default.
-- Added shot video submission, status synchronization, provider output registration, and Production Studio UI.
-- Added CI for Prisma generate/validate, lint, typecheck, tests, and production build.
+- Added MediaAsset and GenerationJob persistence.
+- Added safe MEDIA_ROOT conventions and RunPod Serverless queue/status integration.
+- Added Production Studio and explicit cost-safe RunPod controls.
 
-## Phase 7 — Voice + Keyframe + Image-to-Video
+## Phase 7 — Voice + Keyframe + Video Production
 
 Status: COMPLETE
 
-- Added local Kokoro/OpenAI-compatible TTS client with localhost-only safe configuration and `LOCAL_TTS_ENABLED=false` default.
-- Dialogue lines can generate reusable `VOICE` media assets.
-- Added RunPod text-to-image keyframe jobs.
-- Latest keyframe is passed into the RunPod video job for image-to-video consistency.
-- Completed provider outputs are downloaded into `MEDIA_ROOT` where possible and persisted with SHA-256 checksum/integrity metadata.
-- Production Studio now presents the production chain as Voice → Keyframe → Video.
-- Phase 7 CI passed before merge to `main`.
+- Added local Kokoro/OpenAI-compatible TTS.
+- Added dialogue voice assets, RunPod image/keyframe generation, image-to-video input handling, local provider-output download, and checksums.
+- Production flow is Voice → Keyframe → Video.
 
 ## Phase 8 — Final Renderer
 
 Status: COMPLETE
 
-- Added deterministic episode render timeline with shot ordering, global dialogue timing, caption cues, and voice timing.
-- Added FFconcat and SRT builders with focused unit tests.
-- Added local FFmpeg configuration with `RENDER_ENABLED=false` safe-off default.
-- Final renderer requires a local `VIDEO_CLIP` for every planned shot.
-- Renderer stitches shot clips, scales/crops to configurable vertical output (default 1080x1920 / 30fps), burns captions, mixes generated dialogue voices, and encodes H.264/AAC MP4.
-- Each render is tracked as a `GenerationJob` (`jobType=RENDER`, provider `local-ffmpeg`).
-- Completed MP4 is persisted as a `FINAL_VIDEO` `MediaAsset` with checksum, duration, dimensions, and render metadata.
-- Added safe local media streaming endpoint for browser preview.
-- Added **Render Studio** UI with renderer readiness, per-episode render/re-render, final video preview, and final video gallery.
-- No RunPod/GPU/paid AI call is required by Phase 8 CI.
+- Added deterministic episode timeline, SRT captions, local FFmpeg final rendering, voice mixing, and 1080x1920 MP4 output.
+- Added final-video MediaAsset persistence, preview, and Render Studio.
 
-### Phase 8 verification
+## Phase 9 — End-to-End Automation + Review
 
-GitHub Actions CI passed on the Phase 8 pull request:
+Status: COMPLETE
+
+- Added one-click Generate Episode orchestration.
+- Pipeline synchronizes active RunPod jobs and advances missing Voice → Keyframe → Video → Render work.
+- Duplicate active paid jobs are prevented and configuration/failure conditions stop automatic advancement rather than blindly retrying.
+- Added regenerate controls and final-video Approve / Reject workflow.
+- Final approval moves the episode into an APPROVED release-ready state.
+
+## Phase 10 — YouTube Release + Analytics + Connected UI
+
+Status: COMPLETE (integration code; real channel credentials remain environment-only)
+
+Implemented:
+
+- Added gated release persistence for one publication per episode and timestamped YouTube analytics snapshots.
+- Added OAuth refresh-token based YouTube integration with resumable video upload.
+- Added private-first scheduled publishing support.
+- Added safe-off flags so publishing and analytics are disabled until intentionally enabled.
+- YouTube credentials remain server-side and are never exposed by the status endpoint/UI.
+- Synthetic/altered media disclosure is enabled by default for Random Rooms AI-generated output.
+- Added editable release metadata: title, description, tags, hashtags, privacy, and optional schedule.
+- Upload is blocked until the final video and episode have passed approval gates.
+- Duplicate uploads are blocked once a YouTube video ID exists.
+- Added YouTube Analytics sync for views, likes, comments, watch time, average view duration/percentage, and subscribers gained.
+- Added Release & Analytics Studio with publication state, YouTube link, analytics cards, and explicit safe-off/configuration state.
+- Redesigned Random Rooms Studio around a visible connected production path:
+
+`Plan → Voice → Keyframes → Video → Render → Review → Publish → Analyze`
+
+The path is not only visual: backend prerequisites enforce the important gates, so later irreversible steps cannot bypass required earlier steps.
+
+## Safety Defaults
+
+The following external/runtime operations remain disabled until the user intentionally configures and enables them:
+
+- `RUNPOD_ENABLED=false`
+- `LOCAL_TTS_ENABLED=false`
+- `RENDER_ENABLED=false`
+- `YOUTUBE_PUBLISH_ENABLED=false`
+- `YOUTUBE_ANALYTICS_ENABLED=false`
+
+CI does not make RunPod GPU calls, YouTube uploads, YouTube analytics calls, or other paid/cloud generation calls.
+
+## Verification
+
+Phase 10 pull-request CI passes:
 
 - `npm ci`: PASS
 - `npm run prisma:generate`: PASS
 - `npx prisma validate`: PASS
 - `npm run lint`: PASS
 - `npm run typecheck`: PASS
-- `npm test`: PASS — 29 files / 105 tests
+- `npm test`: PASS
 - `npm run build`: PASS
 
-## Current Production Chain
+## Runtime Setup Remaining Before First Real Episode
 
-`Episode Plan → Voice → Keyframe → RunPod I2V → local media sync → FFmpeg final MP4`
+These are deployment/runtime configuration tasks, not additional implementation phases:
 
-## Remaining Work After Phase 8
+1. Apply all database migrations.
+2. Configure and intentionally enable RunPod image/video endpoint credentials.
+3. Start/configure local TTS and choose final character voices.
+4. Install/validate FFmpeg including subtitle support and enable local rendering.
+5. Configure YouTube OAuth client/refresh token for the target channel.
+6. Keep the first YouTube upload private, validate the complete episode, then enable the desired release/scheduling settings.
 
-- One intentional real RunPod worker smoke test after endpoint ID/API key are supplied via environment and GPU execution is explicitly enabled.
-- Validate local Kokoro installation/voice quality with real dialogue.
-- Validate FFmpeg runtime (including subtitle/libass support) on the user's Windows machine and render one real episode.
-- Phase 9: end-to-end episode orchestration, retries/regenerate/approval workflow.
-- Phase 10: optional YouTube publishing/scheduling and analytics feedback loop.
-
-Do not enable publishing until the generated-media and final-render quality is accepted.
+A real RunPod generation, local TTS output, FFmpeg episode render, and YouTube upload must be smoke-tested in the user's runtime because credentials and local executables are intentionally not committed to the repository.
