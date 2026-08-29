@@ -79,6 +79,6 @@ export function captionsToSrt(captions: CaptionCue[]) {
 }
 
 export function ffconcatContent(paths: string[]) {
-  const quote = (value: string) => value.replace(/'/g, "'\\''");
+  const quote = (value: string) => value.replace(/\\/g, "/").replace(/'/g, "'\\''");
   return paths.map((value) => `file '${quote(value)}'`).join("\n") + "\n";
 }
