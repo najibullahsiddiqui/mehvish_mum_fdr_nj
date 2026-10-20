@@ -36,7 +36,8 @@ const stages: Stage[] = [
 
 function stageIndexForEpisode(episode: RandomRoomsEpisode | null) {
   if (!episode) return 0;
-  if (episode.status === "APPROVED") return 6;
+  if (episode.status === "ANALYZED" || episode.status === "PUBLISHED") return 7;
+  if (episode.status === "UPLOADED" || episode.status === "SCHEDULED" || episode.status === "APPROVED") return 6;
   if (episode.status === "REVIEW") return 5;
   if (episode.status === "PLANNED") return 1;
   return 0;
@@ -45,7 +46,9 @@ function stageIndexForEpisode(episode: RandomRoomsEpisode | null) {
 function stageUnlocked(stageIndex: number, currentIndex: number, episode: RandomRoomsEpisode | null) {
   if (!episode) return stageIndex === 0;
   if (stageIndex <= 5) return stageIndex <= Math.max(currentIndex, 1);
-  if (stageIndex >= 6) return episode.status === "APPROVED";
+  const releaseReady = ["APPROVED", "UPLOADED", "SCHEDULED", "PUBLISHED", "ANALYZED"].includes(episode.status);
+  if (stageIndex === 6) return releaseReady;
+  if (stageIndex === 7) return ["UPLOADED", "SCHEDULED", "PUBLISHED", "ANALYZED"].includes(episode.status);
   return false;
 }
 
