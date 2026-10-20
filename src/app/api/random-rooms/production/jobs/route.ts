@@ -11,9 +11,9 @@ export async function POST(request: Request) {
   try {
     const body = await parseBody(request, submitSchema);
     if (body.kind === "image") {
-      return jsonOk(await submitShotImageJob(body.shotId), "RunPod image job submitted.");
+      return jsonOk(await submitShotImageJob(body.shotId), "Image generation job submitted.");
     }
-    return jsonOk(await submitShotVideoJob(body.shotId), "RunPod video job submitted.");
+    return jsonOk(await submitShotVideoJob(body.shotId), "Video generation job submitted.");
   } catch (error) {
     return routeError(error);
   }
