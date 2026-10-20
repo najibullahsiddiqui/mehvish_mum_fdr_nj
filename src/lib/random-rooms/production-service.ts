@@ -317,7 +317,7 @@ export async function submitShotVideoJob(shotId: string, options: { regenerate?:
     const normalized = normalizeProviderError(error);
     await prisma.generationJob.update({
       where: { id: job.id },
-      data: { status: "FAILED", errorCode: normalized.code, errorMessage: normalized.message, completedAt: new Date() },
+      data: { status: "FAILED", errorCode: normalized.code, errorMessage: normalized.message, completedAt: new Date(), leaseUntil: null, nextPollAt: null },
     });
     throw normalized;
   }
@@ -449,8 +449,9 @@ async function ensureCompletedAsset(job: {
     }
   }
 
-  return prisma.mediaAsset.create({
-    data: {
+  try {
+    return await prisma.mediaAsset.create({
+      data: {
       seriesId: job.seriesId,
       episodeId: job.episodeId,
       sceneId: job.sceneId,
@@ -473,8 +474,14 @@ async function ensureCompletedAsset(job: {
         executionTime: status.executionTime ?? null,
         downloadedBytes: local?.bytes ?? null,
       },
-    },
-  });
+      },
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      return prisma.mediaAsset.findFirst({ where: { providerJobId: job.providerJobId, assetType } });
+    }
+    throw error;
+  }
 }
 
 export async function syncGenerationJob(jobId: string) {
