@@ -5,6 +5,7 @@ import { renderEpisode } from "@/lib/render/service";
 import { getRunPodConfig } from "@/lib/runpod/config";
 import { getLocalTtsConfig } from "@/lib/tts/config";
 import { summarizePipelineState } from "@/lib/random-rooms/pipeline";
+import { latestTerminalFailure } from "@/lib/random-rooms/generation-safety";
 import {
   submitShotImageJob,
   submitShotVideoJob,
@@ -122,6 +123,11 @@ export async function advanceEpisodePipeline(episodeId: string) {
     const hasVoice = line.mediaAssets.some((asset) => asset.assetType === "VOICE_AUDIO" && isReadyAsset(asset) && !!asset.localPath);
     const active = line.generationJobs.some((job) => job.jobType === "VOICE" && isActiveJob(job));
     if (!hasVoice && !active) {
+      const failed = await latestTerminalFailure({ jobType: "VOICE", dialogueLineId: line.id });
+      if (failed) {
+        blocked.push(`Dialogue ${line.id} has a failed voice attempt. Use Regenerate to retry intentionally.`);
+        continue;
+      }
       if (!ttsConfig.enabled) {
         blocked.push("Local TTS is disabled; enable it to generate missing dialogue audio.");
         break;
@@ -147,6 +153,11 @@ export async function advanceEpisodePipeline(episodeId: string) {
     const activeVideo = shot.generationJobs.some((job) => job.jobType === "VIDEO" && isActiveJob(job));
 
     if (!hasImage && !activeImage) {
+      const failedImage = await latestTerminalFailure({ jobType: "IMAGE", shotId: shot.id });
+      if (failedImage) {
+        blocked.push(`Shot ${shot.id} has a failed image attempt. Use Regenerate to retry intentionally.`);
+        continue;
+      }
       if (!runPod.enabled || !runPod.apiKey || !runPod.imageEndpointId) {
         blocked.push("RunPod image generation is disabled or not configured.");
         break;
@@ -166,6 +177,11 @@ export async function advanceEpisodePipeline(episodeId: string) {
     }
 
     if (hasImage && !hasVideo && !activeVideo) {
+      const failedVideo = await latestTerminalFailure({ jobType: "VIDEO", shotId: shot.id });
+      if (failedVideo) {
+        blocked.push(`Shot ${shot.id} has a failed video attempt. Use Regenerate to retry intentionally.`);
+        continue;
+      }
       if (!runPod.enabled || !runPod.apiKey || !runPod.videoEndpointId) {
         blocked.push("RunPod video generation is disabled or not configured.");
         break;
@@ -212,20 +228,26 @@ export async function reviewFinalVideo(assetId: string, decision: "approve" | "r
 
 export async function regenerateProductionTarget(input: { stage: "voice" | "image" | "video" | "render"; targetId: string }) {
   if (input.stage === "voice") {
-    await prisma.mediaAsset.updateMany({ where: { dialogueLineId: input.targetId, assetType: "VOICE_AUDIO", status: { in: READY_ASSET_STATUSES } }, data: { status: "SUPERSEDED" } });
-    return synthesizeDialogueVoice(input.targetId);
+    const result = await synthesizeDialogueVoice(input.targetId, { regenerate: true });
+    await prisma.mediaAsset.updateMany({
+      where: { dialogueLineId: input.targetId, assetType: "VOICE_AUDIO", status: { in: READY_ASSET_STATUSES }, id: { not: result.id } },
+      data: { status: "SUPERSEDED" },
+    });
+    return result;
   }
   if (input.stage === "image") {
-    await prisma.mediaAsset.updateMany({ where: { shotId: input.targetId, assetType: "IMAGE_KEYFRAME", status: { in: READY_ASSET_STATUSES } }, data: { status: "SUPERSEDED" } });
-    return submitShotImageJob(input.targetId);
+    return submitShotImageJob(input.targetId, { regenerate: true });
   }
   if (input.stage === "video") {
-    await prisma.mediaAsset.updateMany({ where: { shotId: input.targetId, assetType: "VIDEO_CLIP", status: { in: READY_ASSET_STATUSES } }, data: { status: "SUPERSEDED" } });
-    return submitShotVideoJob(input.targetId);
+    return submitShotVideoJob(input.targetId, { regenerate: true });
   }
 
   const episode = await prisma.episode.findUnique({ where: { id: input.targetId } });
   if (!episode) throw new HttpError("Episode not found.", 404);
-  await prisma.mediaAsset.updateMany({ where: { episodeId: episode.id, assetType: "FINAL_VIDEO", status: { in: READY_ASSET_STATUSES } }, data: { status: "SUPERSEDED" } });
-  return renderEpisode(episode.id);
+  const result = await renderEpisode(episode.id, { regenerate: true });
+  await prisma.mediaAsset.updateMany({
+    where: { episodeId: episode.id, assetType: "FINAL_VIDEO", status: { in: READY_ASSET_STATUSES }, id: { not: result.asset.id } },
+    data: { status: "SUPERSEDED" },
+  });
+  return result;
 }

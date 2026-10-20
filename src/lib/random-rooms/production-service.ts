@@ -6,6 +6,13 @@ import { downloadRemoteMedia } from "@/lib/media/download";
 import { episodeMediaDirectory, safeMediaSegment } from "@/lib/media/storage";
 import { prisma } from "@/lib/prisma";
 import { normalizeProviderError } from "@/lib/providers/errors";
+import {
+  assertNoActiveGeneration,
+  duplicateGenerationError,
+  generationIdempotencyKey,
+  isUniqueConstraintError,
+  nextGenerationAttempt,
+} from "@/lib/random-rooms/generation-safety";
 import { RunPodClient } from "@/lib/runpod/client";
 import { assertRunPodConfigured, getRunPodConfig } from "@/lib/runpod/config";
 import type { RunPodStatusResponse, RunPodStatusSnapshot } from "@/lib/runpod/types";
@@ -136,7 +143,7 @@ async function shotWithPlanning(shotId: string) {
   return shot;
 }
 
-export async function submitShotImageJob(shotId: string) {
+export async function submitShotImageJob(shotId: string, options: { regenerate?: boolean } = {}) {
   const shot = await shotWithPlanning(shotId);
   if (!shot.imagePrompt.trim()) throw new HttpError("Add an image prompt before generating a keyframe.", 422);
 
@@ -144,6 +151,16 @@ export async function submitShotImageJob(shotId: string) {
   assertRunPodConfigured(config, config.imageEndpointId);
   const endpointId = config.imageEndpointId!;
   const episode = shot.scene.episode;
+  if (!options.regenerate) {
+    const existingAsset = await prisma.mediaAsset.findFirst({
+      where: { shotId: shot.id, assetType: "IMAGE_KEYFRAME", status: { in: ["READY", "APPROVED"] } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (existingAsset) throw new HttpError("This shot already has a usable keyframe. Use regenerate explicitly to create another one.", 409);
+  }
+  await assertNoActiveGeneration({ jobType: "IMAGE", shotId: shot.id });
+  const attempt = options.regenerate ? await nextGenerationAttempt({ jobType: "IMAGE", shotId: shot.id }) : 1;
+
   const input = {
     task: "text_to_image",
     prompt: shot.imagePrompt,
@@ -163,7 +180,9 @@ export async function submitShotImageJob(shotId: string) {
     metadata: { series_id: episode.seriesId, episode_id: episode.id, scene_id: shot.sceneId, shot_id: shot.id },
   };
 
-  const job = await prisma.generationJob.create({
+  let job;
+  try {
+    job = await prisma.generationJob.create({
     data: {
       seriesId: episode.seriesId,
       episodeId: episode.id,
@@ -174,28 +193,42 @@ export async function submitShotImageJob(shotId: string) {
       provider: "runpod",
       model: config.imageModel,
       status: "SUBMITTING",
+      idempotencyKey: generationIdempotencyKey({ jobType: "IMAGE", targetId: shot.id, payload: input, attempt }),
+      attempt,
+      maxAttempts: 2,
       input,
       startedAt: new Date(),
+      leaseUntil: new Date(Date.now() + 2 * 60_000),
+      nextPollAt: new Date(Date.now() + 5_000),
     },
-  });
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) throw duplicateGenerationError("IMAGE");
+    throw error;
+  }
 
   try {
     const submitted = await new RunPodClient(config).submit({ endpointId, input });
     return prisma.generationJob.update({
       where: { id: job.id },
-      data: { providerJobId: submitted.id, status: internalStatus(submitted.status || "IN_QUEUE") },
+      data: {
+        providerJobId: submitted.id,
+        status: internalStatus(submitted.status || "IN_QUEUE"),
+        leaseUntil: null,
+        nextPollAt: new Date(Date.now() + 5_000),
+      },
     });
   } catch (error) {
     const normalized = normalizeProviderError(error);
     await prisma.generationJob.update({
       where: { id: job.id },
-      data: { status: "FAILED", errorCode: normalized.code, errorMessage: normalized.message, completedAt: new Date() },
+      data: { status: "FAILED", errorCode: normalized.code, errorMessage: normalized.message, completedAt: new Date(), leaseUntil: null, nextPollAt: null },
     });
     throw normalized;
   }
 }
 
-export async function submitShotVideoJob(shotId: string) {
+export async function submitShotVideoJob(shotId: string, options: { regenerate?: boolean } = {}) {
   const shot = await shotWithPlanning(shotId);
   if (!shot.videoPrompt.trim()) throw new HttpError("Add a video prompt before sending this shot to RunPod.", 422);
 
@@ -204,12 +237,22 @@ export async function submitShotVideoJob(shotId: string) {
   const endpointId = config.videoEndpointId!;
   const episode = shot.scene.episode;
   const keyframe = await prisma.mediaAsset.findFirst({
-    where: { shotId: shot.id, assetType: "IMAGE_KEYFRAME", status: "READY" },
+    where: { shotId: shot.id, assetType: "IMAGE_KEYFRAME", status: { in: ["READY", "APPROVED"] } },
     orderBy: { createdAt: "desc" },
   });
+  if (!keyframe) throw new HttpError("Generate a keyframe before creating a video clip.", 422);
+  if (!options.regenerate) {
+    const existingAsset = await prisma.mediaAsset.findFirst({
+      where: { shotId: shot.id, assetType: "VIDEO_CLIP", status: { in: ["READY", "APPROVED"] } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (existingAsset) throw new HttpError("This shot already has a usable video clip. Use regenerate explicitly to create another one.", 409);
+  }
+  await assertNoActiveGeneration({ jobType: "VIDEO", shotId: shot.id });
+  const attempt = options.regenerate ? await nextGenerationAttempt({ jobType: "VIDEO", shotId: shot.id }) : 1;
 
   const input = {
-    task: keyframe?.remoteUrl || keyframe?.localPath ? "image_to_video" : "text_to_video",
+    task: "image_to_video",
     prompt: shot.videoPrompt,
     image_url: keyframe?.remoteUrl || null,
     local_image_path: !keyframe?.remoteUrl ? keyframe?.localPath || null : null,
@@ -232,7 +275,9 @@ export async function submitShotVideoJob(shotId: string) {
     metadata: { series_id: episode.seriesId, episode_id: episode.id, scene_id: shot.sceneId, shot_id: shot.id },
   };
 
-  const job = await prisma.generationJob.create({
+  let job;
+  try {
+    job = await prisma.generationJob.create({
     data: {
       seriesId: episode.seriesId,
       episodeId: episode.id,
@@ -243,28 +288,42 @@ export async function submitShotVideoJob(shotId: string) {
       provider: "runpod",
       model: config.videoModel,
       status: "SUBMITTING",
+      idempotencyKey: generationIdempotencyKey({ jobType: "VIDEO", targetId: shot.id, payload: input, attempt }),
+      attempt,
+      maxAttempts: 2,
       input,
       startedAt: new Date(),
+      leaseUntil: new Date(Date.now() + 2 * 60_000),
+      nextPollAt: new Date(Date.now() + 5_000),
     },
-  });
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) throw duplicateGenerationError("VIDEO");
+    throw error;
+  }
 
   try {
     const submitted = await new RunPodClient(config).submit({ endpointId, input });
     return prisma.generationJob.update({
       where: { id: job.id },
-      data: { providerJobId: submitted.id, status: internalStatus(submitted.status || "IN_QUEUE") },
+      data: {
+        providerJobId: submitted.id,
+        status: internalStatus(submitted.status || "IN_QUEUE"),
+        leaseUntil: null,
+        nextPollAt: new Date(Date.now() + 5_000),
+      },
     });
   } catch (error) {
     const normalized = normalizeProviderError(error);
     await prisma.generationJob.update({
       where: { id: job.id },
-      data: { status: "FAILED", errorCode: normalized.code, errorMessage: normalized.message, completedAt: new Date() },
+      data: { status: "FAILED", errorCode: normalized.code, errorMessage: normalized.message, completedAt: new Date(), leaseUntil: null, nextPollAt: null },
     });
     throw normalized;
   }
 }
 
-export async function synthesizeDialogueVoice(dialogueLineId: string) {
+export async function synthesizeDialogueVoice(dialogueLineId: string, options: { regenerate?: boolean } = {}) {
   const line = await prisma.dialogueLine.findUnique({
     where: { id: dialogueLineId },
     include: { character: true, scene: { include: { episode: { include: { series: true } } } } },
@@ -272,7 +331,19 @@ export async function synthesizeDialogueVoice(dialogueLineId: string) {
   if (!line) throw new HttpError("Dialogue line not found.", 404);
 
   const config = getLocalTtsConfig();
-  const job = await prisma.generationJob.create({
+  if (!options.regenerate) {
+    const existingAsset = await prisma.mediaAsset.findFirst({
+      where: { dialogueLineId: line.id, assetType: "VOICE_AUDIO", status: { in: ["READY", "APPROVED"] } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (existingAsset) throw new HttpError("This dialogue already has usable voice audio. Use regenerate explicitly to create another one.", 409);
+  }
+  await assertNoActiveGeneration({ jobType: "VOICE", dialogueLineId: line.id });
+  const voiceInput = { text: line.text, voice: voiceIdFromProfile(line.character.voiceProfile), emotion: line.emotion, deliveryStyle: line.deliveryStyle };
+  const attempt = options.regenerate ? await nextGenerationAttempt({ jobType: "VOICE", dialogueLineId: line.id }) : 1;
+  let job;
+  try {
+    job = await prisma.generationJob.create({
     data: {
       seriesId: line.scene.episode.seriesId,
       episodeId: line.scene.episode.id,
@@ -284,10 +355,18 @@ export async function synthesizeDialogueVoice(dialogueLineId: string) {
       provider: "local-tts",
       model: config.model,
       status: "RUNNING",
-      input: { text: line.text, voice: voiceIdFromProfile(line.character.voiceProfile), emotion: line.emotion, deliveryStyle: line.deliveryStyle },
+      idempotencyKey: generationIdempotencyKey({ jobType: "VOICE", targetId: line.id, payload: voiceInput, attempt }),
+      attempt,
+      maxAttempts: 2,
+      input: voiceInput,
       startedAt: new Date(),
+      leaseUntil: new Date(Date.now() + 2 * 60_000),
     },
-  });
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) throw duplicateGenerationError("VOICE");
+    throw error;
+  }
 
   try {
     const result = await new LocalTtsClient(config).synthesize({ text: line.text, voice: voiceIdFromProfile(line.character.voiceProfile) });
@@ -318,14 +397,14 @@ export async function synthesizeDialogueVoice(dialogueLineId: string) {
           metadata: { voice: result.voice, text: line.text, bytes: result.bytes.length },
         },
       }),
-      prisma.generationJob.update({ where: { id: job.id }, data: { status: "COMPLETED", completedAt: new Date() } }),
+      prisma.generationJob.update({ where: { id: job.id }, data: { status: "COMPLETED", completedAt: new Date(), leaseUntil: null, nextPollAt: null } }),
     ]);
     return asset;
   } catch (error) {
     const normalized = normalizeProviderError(error);
     await prisma.generationJob.update({
       where: { id: job.id },
-      data: { status: "FAILED", errorCode: normalized.code, errorMessage: normalized.message, completedAt: new Date() },
+      data: { status: "FAILED", errorCode: normalized.code, errorMessage: normalized.message, completedAt: new Date(), leaseUntil: null, nextPollAt: null },
     });
     throw normalized;
   }
@@ -344,6 +423,7 @@ async function ensureCompletedAsset(job: {
   provider: string;
   model: string | null;
   jobType: string;
+  attempt: number;
 }, status: RunPodStatusResponse) {
   const remoteUrl = firstUrl(status.output);
   if (!remoteUrl || !job.providerJobId) return null;
@@ -370,32 +450,52 @@ async function ensureCompletedAsset(job: {
     }
   }
 
-  return prisma.mediaAsset.create({
-    data: {
-      seriesId: job.seriesId,
-      episodeId: job.episodeId,
-      sceneId: job.sceneId,
-      shotId: job.shotId,
-      dialogueLineId: job.dialogueLineId,
-      characterId: job.characterId,
-      roomId: job.roomId,
-      assetType,
-      status: "READY",
-      provider: job.provider,
-      providerJobId: job.providerJobId,
-      model: job.model,
-      remoteUrl,
-      localPath: local?.localPath || null,
-      mimeType: local?.mimeType || null,
-      checksum: local?.checksum || null,
-      metadata: {
-        runPodJobId: status.id,
-        delayTime: status.delayTime ?? null,
-        executionTime: status.executionTime ?? null,
-        downloadedBytes: local?.bytes ?? null,
+  try {
+    const created = await prisma.mediaAsset.create({
+      data: {
+        seriesId: job.seriesId,
+        episodeId: job.episodeId,
+        sceneId: job.sceneId,
+        shotId: job.shotId,
+        dialogueLineId: job.dialogueLineId,
+        characterId: job.characterId,
+        roomId: job.roomId,
+        assetType,
+        status: "READY",
+        provider: job.provider,
+        providerJobId: job.providerJobId,
+        model: job.model,
+        remoteUrl,
+        localPath: local?.localPath || null,
+        mimeType: local?.mimeType || null,
+        checksum: local?.checksum || null,
+        metadata: {
+          runPodJobId: status.id,
+          delayTime: status.delayTime ?? null,
+          executionTime: status.executionTime ?? null,
+          downloadedBytes: local?.bytes ?? null,
+          attempt: job.attempt,
+        },
       },
-    },
-  });
+    });
+    if (job.attempt > 1 && job.shotId) {
+      await prisma.mediaAsset.updateMany({
+        where: {
+          shotId: job.shotId,
+          assetType,
+          status: { in: ["READY", "APPROVED"] },
+          id: { not: created.id },
+        },
+        data: { status: "SUPERSEDED" },
+      });
+    }
+    return created;
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      return prisma.mediaAsset.findFirst({ where: { providerJobId: job.providerJobId, assetType } });
+    }
+    throw error;
+  }
 }
 
 export async function syncGenerationJob(jobId: string) {
@@ -420,6 +520,8 @@ export async function syncGenerationJob(jobId: string) {
         output: status.output === undefined ? undefined : (status.output as object),
         errorMessage: status.error || null,
         completedAt: terminal ? new Date() : null,
+        leaseUntil: null,
+        nextPollAt: terminal ? null : new Date(Date.now() + 5_000),
       },
     });
     const asset = mapped === "COMPLETED" ? await ensureCompletedAsset(updated, status) : null;

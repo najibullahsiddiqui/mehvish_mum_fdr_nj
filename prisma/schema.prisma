@@ -362,6 +362,11 @@ model GenerationJob {
   providerJobId  String?
   model          String?
   status         String            @default("CREATED")
+  idempotencyKey String?           @unique
+  attempt        Int               @default(1)
+  maxAttempts    Int               @default(2)
+  leaseUntil     DateTime?
+  nextPollAt     DateTime?
   input          Json
   output         Json?
   errorCode      String?
@@ -384,6 +389,8 @@ model GenerationJob {
   @@index([provider])
   @@index([providerJobId])
   @@index([status])
+  @@index([nextPollAt])
+  @@index([leaseUntil])
   @@index([createdAt])
 }
 
