@@ -279,7 +279,7 @@ export function ProductionStudio(props: { randomRooms: DashboardData["randomRoom
                   <div className="mt-1 line-clamp-2 text-xs font-medium leading-5 text-stone-500">{shot.videoPrompt || shot.imagePrompt || "No production prompt yet."}</div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button type="button" disabled={!shot.imagePrompt || !imageGenerationReady || busyKey === `image:${shot.id}`} onClick={() => void submitShot(shot.id, "image")} className="inline-flex h-9 items-center gap-2 rounded-lg border border-stone-300 px-3 text-xs font-black disabled:cursor-not-allowed disabled:opacity-40"><ImageIcon className="h-3.5 w-3.5" /> Generate keyframe</button>
-                    <button type="button" disabled={!shot.videoPrompt || !videoGenerationReady || busyKey === `video:${shot.id}`} onClick={() => void submitShot(shot.id, "video")} className="inline-flex h-9 items-center gap-2 rounded-lg bg-stone-950 px-3 text-xs font-black text-white disabled:cursor-not-allowed disabled:bg-stone-300"><Play className="h-3.5 w-3.5" /> Generate video</button>
+                    <button type="button" disabled={!shot.videoPrompt || !videoGenerationReady || !(state?.assets || []).some((asset) => asset.assetType === "IMAGE_KEYFRAME" && asset.status === "APPROVED" && asset.shot?.id === shot.id) || busyKey === `video:${shot.id}`} onClick={() => void submitShot(shot.id, "video")} className="inline-flex h-9 items-center gap-2 rounded-lg bg-stone-950 px-3 text-xs font-black text-white disabled:cursor-not-allowed disabled:bg-stone-300"><Play className="h-3.5 w-3.5" /> Generate video</button>
                   </div>
                 </div>
               ))}
