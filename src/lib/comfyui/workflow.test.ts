@@ -1,10 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { generationInputHash } from "@/lib/random-rooms/generation-safety";
+import { hydrateComfyUiWorkflow } from "@/lib/comfyui/workflow";
 
 describe("ComfyUI workflow support", () => {
-  it("keeps semantic job inputs hashable without depending on ComfyUI node ids", () => {
-    const a = generationInputHash({ prompt: "Rex in room", aspectRatio: "9:16" });
-    const b = generationInputHash({ aspectRatio: "9:16", prompt: "Rex in room" });
-    expect(a).toBe(b);
+  it("hydrates typed exact placeholders and inline text placeholders", () => {
+    const workflow = {
+      "1": {
+        class_type: "Example",
+        inputs: {
+          text: "{{PROMPT}} -- {{ASPECT_RATIO}}",
+          seed: "{{SEED}}",
+          image: "{{INPUT_IMAGE_NAME}}",
+        },
+      },
+    };
+    expect(
+      hydrateComfyUiWorkflow(workflow, {
+        PROMPT: "Rex enters the room",
+        ASPECT_RATIO: "9:16",
+        SEED: 42,
+        INPUT_IMAGE_NAME: "keyframe.png",
+      }),
+    ).toEqual({
+      "1": {
+        class_type: "Example",
+        inputs: {
+          text: "Rex enters the room -- 9:16",
+          seed: 42,
+          image: "keyframe.png",
+        },
+      },
+    });
   });
 });
