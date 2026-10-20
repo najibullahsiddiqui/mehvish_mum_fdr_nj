@@ -30,6 +30,7 @@ type ProductionJob = {
   status: string;
   errorMessage: string | null;
   createdAt: string;
+  isPrimary?: boolean;
   episode: { id: string; code: string; title: string; episodeNumber: number } | null;
   scene: { id: string; sceneNumber: number; title: string } | null;
   shot: { id: string; shotNumber: number; shotType: string } | null;
@@ -73,7 +74,21 @@ type TtsState = {
   defaultVoice: string;
 };
 
-type ProductionState = { runPod: RunPodState; jobs: ProductionJob[]; assets: MediaAsset[] };
+type ComfyUiState = {
+  enabled: boolean;
+  configured: boolean;
+  available: boolean | null;
+  imageWorkflowConfigured: boolean;
+  videoWorkflowConfigured: boolean;
+};
+
+type ProductionState = {
+  mediaGenerationProvider: "runpod-serverless" | "comfyui";
+  runPod: RunPodState;
+  comfyUi: ComfyUiState;
+  jobs: ProductionJob[];
+  assets: MediaAsset[];
+};
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, headers: { "content-type": "application/json", ...(init?.headers || {}) } });
@@ -148,7 +163,7 @@ export function ProductionStudio(props: { randomRooms: DashboardData["randomRoom
     setNotice(null);
     try {
       await request("/api/random-rooms/production/jobs", { method: "POST", body: JSON.stringify({ shotId, kind }) });
-      setNotice(`${kind === "image" ? "Image" : "Video"} job queued on RunPod.`);
+      setNotice(`${kind === "image" ? "Image" : "Video"} job queued on ${state?.mediaGenerationProvider === "comfyui" ? "ComfyUI" : "RunPod"}.`);
       await load();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : `Could not submit ${kind} job.`);
@@ -172,6 +187,23 @@ export function ProductionStudio(props: { randomRooms: DashboardData["randomRoom
     }
   };
 
+  const reviewKeyframe = async (assetId: string, decision: "approve" | "reject") => {
+    setBusyKey(`keyframe:${assetId}`);
+    setNotice(null);
+    try {
+      await request("/api/random-rooms/keyframes/review", {
+        method: "POST",
+        body: JSON.stringify({ assetId, decision }),
+      });
+      setNotice(`Keyframe ${decision}d.`);
+      await load();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not review keyframe.");
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const syncJob = async (jobId: string) => {
     setNotice(null);
     try {
@@ -185,6 +217,14 @@ export function ProductionStudio(props: { randomRooms: DashboardData["randomRoom
   if (!series) return <div className="rounded-2xl border border-stone-200 bg-white p-6 text-sm text-stone-500">Create a Random Rooms series first.</div>;
 
   const runPod = runPodHealth || state?.runPod;
+  const comfyUi = state?.comfyUi;
+  const usingComfyUi = state?.mediaGenerationProvider === "comfyui";
+  const imageGenerationReady = usingComfyUi
+    ? !!comfyUi?.enabled && !!comfyUi?.imageWorkflowConfigured
+    : !!runPod?.enabled && !!runPod?.imageConfigured;
+  const videoGenerationReady = usingComfyUi
+    ? !!comfyUi?.enabled && !!comfyUi?.videoWorkflowConfigured
+    : !!runPod?.enabled && !!runPod?.videoConfigured;
   const shots = series.episodes.flatMap((episode) => episode.scenes.flatMap((scene) => scene.shots.map((shot) => ({ episode, scene, shot }))));
   const dialogue = series.episodes.flatMap((episode) => episode.scenes.flatMap((scene) => scene.dialogueLines.map((line) => ({ episode, scene, line }))));
 
@@ -195,13 +235,19 @@ export function ProductionStudio(props: { randomRooms: DashboardData["randomRoom
           <div>
             <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-stone-200"><Sparkles className="h-3.5 w-3.5" /> Production Cockpit</div>
             <h3 className="text-2xl font-black tracking-tight lg:text-3xl">Voice → Keyframe → Video</h3>
-            <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-stone-300">Build each shot in stages: local dialogue voice, RunPod keyframe image, then image-to-video. Completed provider outputs are persisted into the media library and downloaded locally when possible.</p>
+            <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-stone-300">Build each shot in stages: local dialogue voice, reference-guided keyframe, human approval, then image-to-video. Video generation stays locked until a keyframe is approved.</p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-              <div className="flex items-center gap-2 font-black"><ServerCog className="h-4 w-4" /> RunPod</div>
-              <div className="mt-2 text-xs font-bold text-stone-300">{runPod?.available ? "Connected" : runPod?.enabled ? "Enabled" : "Safe off"}</div>
-              <div className="mt-1 text-[11px] text-stone-500">Image: {runPod?.imageConfigured ? "ready" : "not set"} · Video: {runPod?.videoConfigured ? "ready" : "not set"}</div>
+              <div className="flex items-center gap-2 font-black"><ServerCog className="h-4 w-4" /> {usingComfyUi ? "ComfyUI Pod" : "RunPod Serverless"}</div>
+              <div className="mt-2 text-xs font-bold text-stone-300">
+                {usingComfyUi
+                  ? (comfyUi?.available ? "Connected" : comfyUi?.enabled ? "Enabled" : "Safe off")
+                  : (runPod?.available ? "Connected" : runPod?.enabled ? "Enabled" : "Safe off")}
+              </div>
+              <div className="mt-1 text-[11px] text-stone-500">
+                Image: {imageGenerationReady ? "ready" : "not set"} · Video: {videoGenerationReady ? "ready" : "not set"}
+              </div>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <div className="flex items-center gap-2 font-black"><Mic2 className="h-4 w-4" /> Local TTS</div>
@@ -232,8 +278,8 @@ export function ProductionStudio(props: { randomRooms: DashboardData["randomRoom
                   <div className="mt-1 font-black text-stone-950">{shot.actionDescription}</div>
                   <div className="mt-1 line-clamp-2 text-xs font-medium leading-5 text-stone-500">{shot.videoPrompt || shot.imagePrompt || "No production prompt yet."}</div>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="button" disabled={!shot.imagePrompt || !runPod?.enabled || !runPod?.imageConfigured || busyKey === `image:${shot.id}`} onClick={() => void submitShot(shot.id, "image")} className="inline-flex h-9 items-center gap-2 rounded-lg border border-stone-300 px-3 text-xs font-black disabled:cursor-not-allowed disabled:opacity-40"><ImageIcon className="h-3.5 w-3.5" /> Generate keyframe</button>
-                    <button type="button" disabled={!shot.videoPrompt || !runPod?.enabled || !runPod?.videoConfigured || busyKey === `video:${shot.id}`} onClick={() => void submitShot(shot.id, "video")} className="inline-flex h-9 items-center gap-2 rounded-lg bg-stone-950 px-3 text-xs font-black text-white disabled:cursor-not-allowed disabled:bg-stone-300"><Play className="h-3.5 w-3.5" /> Generate video</button>
+                    <button type="button" disabled={!shot.imagePrompt || !imageGenerationReady || busyKey === `image:${shot.id}`} onClick={() => void submitShot(shot.id, "image")} className="inline-flex h-9 items-center gap-2 rounded-lg border border-stone-300 px-3 text-xs font-black disabled:cursor-not-allowed disabled:opacity-40"><ImageIcon className="h-3.5 w-3.5" /> Generate keyframe</button>
+                    <button type="button" disabled={!shot.videoPrompt || !videoGenerationReady || busyKey === `video:${shot.id}`} onClick={() => void submitShot(shot.id, "video")} className="inline-flex h-9 items-center gap-2 rounded-lg bg-stone-950 px-3 text-xs font-black text-white disabled:cursor-not-allowed disabled:bg-stone-300"><Play className="h-3.5 w-3.5" /> Generate video</button>
                   </div>
                 </div>
               ))}
@@ -276,7 +322,25 @@ export function ProductionStudio(props: { randomRooms: DashboardData["randomRoom
                 <div key={asset.id} className="rounded-xl border border-stone-200 p-3">
                   <div className="flex items-center justify-between gap-3"><div className="text-sm font-black">{asset.assetType}</div><StatusBadge status={asset.status} /></div>
                   <div className="mt-1 text-xs font-medium text-stone-500">{asset.episode?.title || "Series asset"}{asset.shot ? ` · Shot ${asset.shot.shotNumber}` : ""}</div>
-                  <div className="mt-2 flex flex-wrap gap-3 text-xs font-black text-sky-700">{asset.remoteUrl ? <a href={asset.remoteUrl} target="_blank" rel="noreferrer">Open remote</a> : null}{asset.localPath ? <span className="text-emerald-700">Saved locally</span> : null}</div>
+                  {asset.assetType === "IMAGE_KEYFRAME" && asset.localPath ? (
+                    <img src={`/api/media/${asset.id}`} alt="" className="mt-3 max-h-72 w-full rounded-lg bg-stone-100 object-contain" />
+                  ) : null}
+                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-black text-sky-700">
+                    {asset.remoteUrl ? <a href={asset.remoteUrl} target="_blank" rel="noreferrer">Open remote</a> : null}
+                    {asset.localPath ? <a href={`/api/media/${asset.id}`} target="_blank" rel="noreferrer" className="text-emerald-700">Open local</a> : null}
+                    {asset.assetType === "IMAGE_KEYFRAME" && ["READY", "APPROVED"].includes(asset.status) ? (
+                      <>
+                        {asset.status !== "APPROVED" ? (
+                          <button type="button" disabled={busyKey === `keyframe:${asset.id}`} onClick={() => void reviewKeyframe(asset.id, "approve")} className="rounded-md bg-emerald-600 px-2 py-1 text-white">
+                            Approve
+                          </button>
+                        ) : <span className="text-emerald-700">Approved for video</span>}
+                        <button type="button" disabled={busyKey === `keyframe:${asset.id}`} onClick={() => void reviewKeyframe(asset.id, "reject")} className="rounded-md border border-rose-200 px-2 py-1 text-rose-700">
+                          Reject
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
                 </div>
               ))}
               {!state?.assets.length ? <p className="text-sm font-medium text-stone-500">Voice, keyframes, and video clips will appear here.</p> : null}
