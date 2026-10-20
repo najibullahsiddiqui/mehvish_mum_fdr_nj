@@ -404,7 +404,7 @@ export async function synthesizeDialogueVoice(dialogueLineId: string, options: {
     const normalized = normalizeProviderError(error);
     await prisma.generationJob.update({
       where: { id: job.id },
-      data: { status: "FAILED", errorCode: normalized.code, errorMessage: normalized.message, completedAt: new Date() },
+      data: { status: "FAILED", errorCode: normalized.code, errorMessage: normalized.message, completedAt: new Date(), leaseUntil: null, nextPollAt: null },
     });
     throw normalized;
   }
@@ -423,6 +423,7 @@ async function ensureCompletedAsset(job: {
   provider: string;
   model: string | null;
   jobType: string;
+  attempt: number;
 }, status: RunPodStatusResponse) {
   const remoteUrl = firstUrl(status.output);
   if (!remoteUrl || !job.providerJobId) return null;
@@ -450,32 +451,45 @@ async function ensureCompletedAsset(job: {
   }
 
   try {
-    return await prisma.mediaAsset.create({
+    const created = await prisma.mediaAsset.create({
       data: {
-      seriesId: job.seriesId,
-      episodeId: job.episodeId,
-      sceneId: job.sceneId,
-      shotId: job.shotId,
-      dialogueLineId: job.dialogueLineId,
-      characterId: job.characterId,
-      roomId: job.roomId,
-      assetType,
-      status: "READY",
-      provider: job.provider,
-      providerJobId: job.providerJobId,
-      model: job.model,
-      remoteUrl,
-      localPath: local?.localPath || null,
-      mimeType: local?.mimeType || null,
-      checksum: local?.checksum || null,
-      metadata: {
-        runPodJobId: status.id,
-        delayTime: status.delayTime ?? null,
-        executionTime: status.executionTime ?? null,
-        downloadedBytes: local?.bytes ?? null,
-      },
+        seriesId: job.seriesId,
+        episodeId: job.episodeId,
+        sceneId: job.sceneId,
+        shotId: job.shotId,
+        dialogueLineId: job.dialogueLineId,
+        characterId: job.characterId,
+        roomId: job.roomId,
+        assetType,
+        status: "READY",
+        provider: job.provider,
+        providerJobId: job.providerJobId,
+        model: job.model,
+        remoteUrl,
+        localPath: local?.localPath || null,
+        mimeType: local?.mimeType || null,
+        checksum: local?.checksum || null,
+        metadata: {
+          runPodJobId: status.id,
+          delayTime: status.delayTime ?? null,
+          executionTime: status.executionTime ?? null,
+          downloadedBytes: local?.bytes ?? null,
+          attempt: job.attempt,
+        },
       },
     });
+    if (job.attempt > 1 && job.shotId) {
+      await prisma.mediaAsset.updateMany({
+        where: {
+          shotId: job.shotId,
+          assetType,
+          status: { in: ["READY", "APPROVED"] },
+          id: { not: created.id },
+        },
+        data: { status: "SUPERSEDED" },
+      });
+    }
+    return created;
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       return prisma.mediaAsset.findFirst({ where: { providerJobId: job.providerJobId, assetType } });
