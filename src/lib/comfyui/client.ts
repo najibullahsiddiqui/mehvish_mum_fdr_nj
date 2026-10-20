@@ -80,7 +80,8 @@ export class ComfyUiClient {
     overwrite?: boolean;
   }): Promise<ComfyUiUploadResponse> {
     const form = new FormData();
-    form.append("image", new Blob([input.bytes]), input.filename);
+    const uploadBytes = new Uint8Array(input.bytes);
+    form.append("image", new Blob([uploadBytes.buffer]), input.filename);
     form.append("type", "input");
     if (input.subfolder) form.append("subfolder", input.subfolder);
     form.append("overwrite", input.overwrite ? "true" : "false");
