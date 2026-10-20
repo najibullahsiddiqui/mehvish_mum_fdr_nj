@@ -72,6 +72,7 @@ model RandomRoomsSeries {
   episodes           Episode[]
   mediaAssets        MediaAsset[]
   generationJobs     GenerationJob[]
+  publications       RandomRoomsPublication[]
   createdAt          DateTime                @default(now())
   updatedAt          DateTime                @updatedAt
 
@@ -185,6 +186,8 @@ model Episode {
   scenes               Scene[]
   mediaAssets          MediaAsset[]
   generationJobs       GenerationJob[]
+  publication          RandomRoomsPublication?
+  analyticsSnapshots   RandomRoomsAnalyticsSnapshot[]
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
@@ -322,6 +325,7 @@ model MediaAsset {
   height         Int?
   checksum       String?
   metadata       Json?
+  publications   RandomRoomsPublication[]
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
@@ -381,6 +385,59 @@ model GenerationJob {
   @@index([providerJobId])
   @@index([status])
   @@index([createdAt])
+}
+
+model RandomRoomsPublication {
+  id             String                         @id @default(cuid())
+  seriesId       String
+  series         RandomRoomsSeries              @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  episodeId      String                         @unique
+  episode        Episode                        @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  finalAssetId   String
+  finalAsset     MediaAsset                     @relation(fields: [finalAssetId], references: [id], onDelete: Restrict)
+  platform       String                         @default("youtube")
+  status         String                         @default("DRAFT")
+  title          String
+  description    String                         @default("")
+  tags           String[]                       @default([])
+  hashtags       String[]                       @default([])
+  privacyStatus  String                         @default("private")
+  scheduledAt    DateTime?
+  publishedAt    DateTime?
+  youtubeVideoId String?
+  youtubeUrl     String?
+  lastSyncAt     DateTime?
+  errorMessage   String?
+  analytics      RandomRoomsAnalyticsSnapshot[]
+  createdAt      DateTime                       @default(now())
+  updatedAt      DateTime                       @updatedAt
+
+  @@index([seriesId])
+  @@index([status])
+  @@index([youtubeVideoId])
+}
+
+model RandomRoomsAnalyticsSnapshot {
+  id                      String                 @id @default(cuid())
+  publicationId           String
+  publication             RandomRoomsPublication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  episodeId               String
+  episode                 Episode                @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  youtubeVideoId          String
+  views                   Int?
+  likes                   Int?
+  comments                Int?
+  estimatedMinutesWatched Float?
+  averageViewDurationSec  Float?
+  averageViewPercentage   Float?
+  subscribersGained       Int?
+  impressions             Int?
+  impressionsCtr          Float?
+  collectedAt             DateTime               @default(now())
+
+  @@index([publicationId])
+  @@index([episodeId])
+  @@index([collectedAt])
 }
 
 model Idea {
