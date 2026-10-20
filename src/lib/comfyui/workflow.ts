@@ -4,11 +4,11 @@ import { ProviderConfigurationError } from "@/lib/providers/errors";
 
 export type WorkflowVariables = Record<string, string | number | boolean | null>;
 
-function replaceValue(value: unknown, variables: WorkflowVariables): unknown {
-  if (Array.isArray(value)) return value.map((entry) => replaceValue(entry, variables));
+export function hydrateComfyUiWorkflow(value: unknown, variables: WorkflowVariables): unknown {
+  if (Array.isArray(value)) return value.map((entry) => hydrateComfyUiWorkflow(entry, variables));
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, replaceValue(entry, variables)]),
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, hydrateComfyUiWorkflow(entry, variables)]),
     );
   }
   if (typeof value !== "string") return value;
@@ -57,7 +57,7 @@ export async function loadComfyUiWorkflow(
     throw new ProviderConfigurationError("ComfyUI workflow must be an API-format JSON object.");
   }
 
-  const hydrated = replaceValue(parsed, variables) as Record<string, unknown>;
+  const hydrated = hydrateComfyUiWorkflow(parsed, variables) as Record<string, unknown>;
   const unresolved = unresolvedPlaceholders(hydrated);
   if (unresolved.length) {
     throw new ProviderConfigurationError(`Unresolved ComfyUI workflow variables: ${unresolved.join(", ")}.`);
