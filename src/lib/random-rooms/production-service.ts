@@ -582,11 +582,142 @@ async function ensureCompletedAsset(job: {
   }
 }
 
+async function ensureCompletedComfyAsset(
+  job: {
+    id: string;
+    seriesId: string;
+    episodeId: string | null;
+    sceneId: string | null;
+    shotId: string | null;
+    dialogueLineId: string | null;
+    characterId: string | null;
+    roomId: string | null;
+    providerJobId: string | null;
+    provider: string;
+    model: string | null;
+    jobType: string;
+    attempt: number;
+  },
+  provider: ComfyUiProvider,
+  output: { filename: string; subfolder: string; type: string },
+) {
+  if (!job.providerJobId || !job.episodeId) return null;
+  const assetType = job.jobType === "IMAGE" ? "IMAGE_KEYFRAME" : "VIDEO_CLIP";
+  const existing = await prisma.mediaAsset.findFirst({ where: { providerJobId: job.providerJobId, assetType } });
+  if (existing) return existing;
+
+  const episode = await prisma.episode.findUnique({
+    where: { id: job.episodeId },
+    include: { series: true },
+  });
+  if (!episode) throw new HttpError("Episode not found while storing ComfyUI output.", 404);
+
+  const downloaded = await provider.download(output);
+  const fallbackExtension = job.jobType === "IMAGE" ? ".png" : ".mp4";
+  const extension = path.extname(output.filename) || fallbackExtension;
+  const directory = episodeMediaDirectory(
+    episode.series.slug,
+    episode.code,
+    job.jobType === "IMAGE" ? "images" : "video",
+  );
+  await mkdir(directory, { recursive: true });
+  const localPath = path.join(
+    directory,
+    `${safeMediaSegment(`${job.jobType.toLowerCase()}-${job.shotId || job.id}-${job.providerJobId}`)}${extension}`,
+  );
+  await writeFile(localPath, downloaded.bytes);
+  const checksum = createHash("sha256").update(downloaded.bytes).digest("hex");
+
+  try {
+    const created = await prisma.mediaAsset.create({
+      data: {
+        seriesId: job.seriesId,
+        episodeId: job.episodeId,
+        sceneId: job.sceneId,
+        shotId: job.shotId,
+        dialogueLineId: job.dialogueLineId,
+        characterId: job.characterId,
+        roomId: job.roomId,
+        assetType,
+        status: "READY",
+        provider: "comfyui",
+        providerJobId: job.providerJobId,
+        model: job.model,
+        localPath,
+        mimeType: downloaded.mimeType,
+        checksum,
+        metadata: {
+          comfyPromptId: job.providerJobId,
+          output,
+          downloadedBytes: downloaded.bytes.length,
+          attempt: job.attempt,
+        },
+      },
+    });
+
+    if (job.attempt > 1 && job.shotId) {
+      await prisma.mediaAsset.updateMany({
+        where: {
+          shotId: job.shotId,
+          assetType,
+          status: { in: ["READY", "APPROVED"] },
+          id: { not: created.id },
+        },
+        data: { status: "SUPERSEDED" },
+      });
+    }
+    return created;
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      return prisma.mediaAsset.findFirst({ where: { providerJobId: job.providerJobId, assetType } });
+    }
+    throw error;
+  }
+}
+
 export async function syncGenerationJob(jobId: string) {
   const job = await prisma.generationJob.findUnique({ where: { id: jobId } });
   if (!job) throw new HttpError("Generation job not found.", 404);
-  if (job.provider !== "runpod") throw new HttpError("Only RunPod jobs can be synced by this endpoint.", 422);
-  if (!job.providerJobId) throw new HttpError("RunPod job ID is missing.", 422);
+  if (!job.providerJobId) throw new HttpError("Provider job ID is missing.", 422);
+
+  if (job.provider === "comfyui") {
+    if (job.jobType !== "IMAGE" && job.jobType !== "VIDEO") {
+      throw new HttpError("ComfyUI sync supports IMAGE and VIDEO jobs only.", 422);
+    }
+
+    try {
+      const provider = new ComfyUiProvider();
+      const state = await provider.poll(job.providerJobId, job.jobType);
+      const terminal = state.status === "COMPLETED" || state.status === "FAILED";
+      const updated = await prisma.generationJob.update({
+        where: { id: job.id },
+        data: {
+          status: state.status,
+          output: state.raw as object,
+          errorMessage: state.error,
+          completedAt: terminal ? new Date() : null,
+          leaseUntil: null,
+          nextPollAt: terminal ? null : new Date(Date.now() + 5_000),
+        },
+      });
+      const asset =
+        state.status === "COMPLETED" && state.output
+          ? await ensureCompletedComfyAsset(updated, provider, state.output)
+          : null;
+      return { job: updated, asset, providerStatus: state };
+    } catch (error) {
+      const normalized = normalizeProviderError(error);
+      await prisma.generationJob.update({
+        where: { id: job.id },
+        data: { errorCode: normalized.code, errorMessage: normalized.message, leaseUntil: null },
+      });
+      throw normalized;
+    }
+  }
+
+  if (job.provider !== "runpod") {
+    throw new HttpError(`Provider ${job.provider} does not support asynchronous sync.`, 422);
+  }
 
   const config = getRunPodConfig();
   const endpointId = job.jobType === "IMAGE" ? config.imageEndpointId : config.videoEndpointId;
@@ -612,7 +743,10 @@ export async function syncGenerationJob(jobId: string) {
     return { job: updated, asset, providerStatus: status };
   } catch (error) {
     const normalized = normalizeProviderError(error);
-    await prisma.generationJob.update({ where: { id: job.id }, data: { errorCode: normalized.code, errorMessage: normalized.message } });
+    await prisma.generationJob.update({
+      where: { id: job.id },
+      data: { errorCode: normalized.code, errorMessage: normalized.message, leaseUntil: null },
+    });
     throw normalized;
   }
 }
