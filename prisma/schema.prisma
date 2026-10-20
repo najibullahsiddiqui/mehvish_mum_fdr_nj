@@ -314,6 +314,7 @@ model MediaAsset {
   room           RoomProfile?      @relation(fields: [roomId], references: [id], onDelete: SetNull)
   assetType      String
   status         String            @default("READY")
+  isPrimary      Boolean           @default(false)
   provider       String?
   providerJobId  String?
   model          String?
@@ -338,6 +339,7 @@ model MediaAsset {
   @@index([roomId])
   @@index([assetType])
   @@index([status])
+  @@index([isPrimary])
   @@index([providerJobId])
 }
 
