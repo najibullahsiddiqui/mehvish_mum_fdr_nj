@@ -141,10 +141,55 @@ export async function listProductionState(seriesId: string) {
 async function shotWithPlanning(shotId: string) {
   const shot = await prisma.shot.findUnique({
     where: { id: shotId },
-    include: { scene: { include: { episode: true, room: true } } },
+    include: {
+      scene: {
+        include: {
+          episode: {
+            include: {
+              characterAssignments: { include: { character: true }, orderBy: { priority: "asc" } },
+            },
+          },
+          room: true,
+          dialogueLines: { select: { characterId: true } },
+        },
+      },
+    },
   });
   if (!shot) throw new HttpError("Shot not found.", 404);
   return shot;
+}
+
+async function primaryReferenceAssetsForShot(shot: Awaited<ReturnType<typeof shotWithPlanning>>) {
+  const dialogueCharacterIds = [...new Set(shot.scene.dialogueLines.map((line) => line.characterId))];
+  const fallbackCharacterIds = shot.scene.episode.characterAssignments.map((assignment) => assignment.characterId);
+  const characterIds = dialogueCharacterIds.length ? dialogueCharacterIds : fallbackCharacterIds;
+
+  const [characters, room] = await Promise.all([
+    prisma.mediaAsset.findMany({
+      where: {
+        characterId: { in: characterIds },
+        assetType: "CHARACTER_REFERENCE",
+        isPrimary: true,
+        status: { in: ["READY", "APPROVED"] },
+        localPath: { not: null },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    shot.scene.roomId
+      ? prisma.mediaAsset.findFirst({
+          where: {
+            roomId: shot.scene.roomId,
+            assetType: "ROOM_REFERENCE",
+            isPrimary: true,
+            status: { in: ["READY", "APPROVED"] },
+            localPath: { not: null },
+          },
+          orderBy: { createdAt: "desc" },
+        })
+      : null,
+  ]);
+
+  return { characters, room };
 }
 
 export async function submitShotImageJob(shotId: string, options: { regenerate?: boolean } = {}) {
@@ -164,6 +209,7 @@ export async function submitShotImageJob(shotId: string, options: { regenerate?:
   const attempt = options.regenerate ? await nextGenerationAttempt({ jobType: "IMAGE", shotId: shot.id }) : 1;
   const providerName = getMediaGenerationProvider();
 
+  const references = await primaryReferenceAssetsForShot(shot);
   const input = {
     task: "text_to_image",
     prompt: shot.imagePrompt,
@@ -171,6 +217,10 @@ export async function submitShotImageJob(shotId: string, options: { regenerate?:
     aspect_ratio: episode.targetAspectRatio,
     camera_framing: shot.cameraFraming,
     continuity_notes: shot.continuityNotes,
+    reference_assets: {
+      character_asset_ids: references.characters.map((asset) => asset.id),
+      room_asset_id: references.room?.id || null,
+    },
     room: shot.scene.room
       ? {
           code: shot.scene.room.code,
@@ -216,6 +266,22 @@ export async function submitShotImageJob(shotId: string, options: { regenerate?:
   try {
     if (providerName === "comfyui") {
       const comfyConfig = getComfyUiConfig();
+      const referenceUploads: Array<{ bytes: Uint8Array; filename: string; variablePrefix: string }> = [];
+      for (const [index, asset] of references.characters.entries()) {
+        if (!asset.localPath) continue;
+        referenceUploads.push({
+          bytes: await readFile(asset.localPath),
+          filename: path.basename(asset.localPath),
+          variablePrefix: `CHARACTER_REFERENCE_${index + 1}`,
+        });
+      }
+      if (references.room?.localPath) {
+        referenceUploads.push({
+          bytes: await readFile(references.room.localPath),
+          filename: path.basename(references.room.localPath),
+          variablePrefix: "ROOM_REFERENCE",
+        });
+      }
       const submitted = await new ComfyUiProvider().submitImage({
         PROMPT: shot.imagePrompt,
         NEGATIVE_PROMPT: comfyConfig.defaultNegativePrompt,
@@ -224,7 +290,9 @@ export async function submitShotImageJob(shotId: string, options: { regenerate?:
         CAMERA_FRAMING: shot.cameraFraming,
         CONTINUITY_NOTES: shot.continuityNotes || "",
         SEED: attempt,
-      });
+        CHARACTER_REFERENCE_COUNT: references.characters.length,
+        HAS_ROOM_REFERENCE: !!references.room,
+      }, referenceUploads);
       return prisma.generationJob.update({
         where: { id: job.id },
         data: {
@@ -271,10 +339,10 @@ export async function submitShotVideoJob(shotId: string, options: { regenerate?:
 
   const episode = shot.scene.episode;
   const keyframe = await prisma.mediaAsset.findFirst({
-    where: { shotId: shot.id, assetType: "IMAGE_KEYFRAME", status: { in: ["READY", "APPROVED"] } },
+    where: { shotId: shot.id, assetType: "IMAGE_KEYFRAME", status: "APPROVED" },
     orderBy: { createdAt: "desc" },
   });
-  if (!keyframe) throw new HttpError("Generate a keyframe before creating a video clip.", 422);
+  if (!keyframe) throw new HttpError("Approve a keyframe before creating a video clip.", 422);
 
   if (!options.regenerate) {
     const existingAsset = await prisma.mediaAsset.findFirst({

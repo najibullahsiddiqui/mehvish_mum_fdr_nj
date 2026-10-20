@@ -9,6 +9,7 @@ import type {
   RandomRoomsCharacterRelationship,
   RandomRoomsSeries,
 } from "@/lib/types";
+import { ReferenceManager } from "@/components/random-rooms/ReferenceManager";
 import { cn, listFromTextarea, textareaFromList, titleCaseStatus } from "@/lib/utils";
 
 type Notice = {
@@ -657,6 +658,9 @@ export function CharacterStudio(props: { randomRooms: DashboardData["randomRooms
                 )}
               </div>
             </form>
+            {editingCharacterId ? (
+              <ReferenceManager ownerType="character" ownerId={editingCharacterId} label="Character" />
+            ) : null}
           </section>
 
           <section className="grid grid-cols-1 content-start gap-4">

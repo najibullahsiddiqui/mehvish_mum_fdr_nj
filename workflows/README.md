@@ -17,6 +17,12 @@ Supported placeholders currently sent by CreatorPilot:
 - `{{CAMERA_FRAMING}}`
 - `{{CONTINUITY_NOTES}}`
 - `{{SEED}}`
+- `{{CHARACTER_REFERENCE_COUNT}}`
+- `{{CHARACTER_REFERENCE_1_NAME}}`, `{{CHARACTER_REFERENCE_1_SUBFOLDER}}`, `{{CHARACTER_REFERENCE_1_TYPE}}` (and 2, 3, ... when multiple characters are present)
+- `{{HAS_ROOM_REFERENCE}}`
+- `{{ROOM_REFERENCE_NAME}}`, `{{ROOM_REFERENCE_SUBFOLDER}}`, `{{ROOM_REFERENCE_TYPE}}`
+
+Reference placeholders are populated from the primary character/room reference assets selected in CreatorPilot. Only placeholders actually present in your exported workflow need to be used.
 
 The workflow should finish with a normal downloadable ComfyUI output such as a Save Image node.
 

@@ -3,6 +3,7 @@
 import { DoorOpen, Loader2, Pencil, Plus, Power, RotateCcw, Save } from "lucide-react";
 import { type FormEvent, type ReactNode, useMemo, useState } from "react";
 import type { ApiResponse, DashboardData, RandomRoomsRoomProfile, RandomRoomsSeries } from "@/lib/types";
+import { ReferenceManager } from "@/components/random-rooms/ReferenceManager";
 import { cn, listFromTextarea, textareaFromList } from "@/lib/utils";
 
 type Notice = {
@@ -392,6 +393,7 @@ export function RoomStudio(props: { randomRooms: DashboardData["randomRooms"]; o
           </div>
 
           {previewRoom && (
+            <>
             <div className="rounded-lg border border-stone-200 bg-stone-950 p-4 text-stone-100">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-md bg-white px-2 py-1 text-xs font-black text-stone-950">{previewRoom.code}</span>
@@ -414,6 +416,8 @@ export function RoomStudio(props: { randomRooms: DashboardData["randomRooms"]; o
                 </div>
               </div>
             </div>
+            <ReferenceManager ownerType="room" ownerId={previewRoom.id} label="Room" />
+            </>
           )}
         </section>
 

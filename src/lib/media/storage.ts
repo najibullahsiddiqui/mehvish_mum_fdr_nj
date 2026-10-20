@@ -37,3 +37,18 @@ export async function ensureEpisodeMediaDirectory(
   await mkdir(directory, { recursive: true });
   return directory;
 }
+
+
+export function seriesMediaDirectory(seriesSlug: string, category: string, env: MediaEnv = process.env) {
+  return resolveMediaPath(["random-rooms", seriesSlug, category], env);
+}
+
+export async function ensureSeriesMediaDirectory(
+  seriesSlug: string,
+  category: string,
+  env: MediaEnv = process.env,
+) {
+  const directory = seriesMediaDirectory(seriesSlug, category, env);
+  await mkdir(directory, { recursive: true });
+  return directory;
+}

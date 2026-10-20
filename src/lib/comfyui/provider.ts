@@ -24,8 +24,26 @@ export class ComfyUiProvider {
   private readonly config = getComfyUiConfig();
   private readonly client = new ComfyUiClient(this.config);
 
-  async submitImage(variables: WorkflowVariables) {
-    const workflow = await loadComfyUiWorkflow(this.config.imageWorkflowPath, variables);
+  async submitImage(
+    variables: WorkflowVariables,
+    references: Array<{ bytes: Uint8Array; filename: string; variablePrefix: string }> = [],
+  ) {
+    const referenceVariables: WorkflowVariables = {};
+    for (const reference of references) {
+      const uploaded = await this.client.uploadImage({
+        bytes: reference.bytes,
+        filename: reference.filename,
+        subfolder: "creatorpilot/references",
+        overwrite: true,
+      });
+      referenceVariables[`${reference.variablePrefix}_NAME`] = uploaded.name;
+      referenceVariables[`${reference.variablePrefix}_SUBFOLDER`] = uploaded.subfolder;
+      referenceVariables[`${reference.variablePrefix}_TYPE`] = uploaded.type;
+    }
+    const workflow = await loadComfyUiWorkflow(this.config.imageWorkflowPath, {
+      ...variables,
+      ...referenceVariables,
+    });
     return this.client.submitPrompt(workflow);
   }
 
