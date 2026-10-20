@@ -66,7 +66,7 @@ export async function getEpisodePipelineState(episodeId: string) {
     })),
     shots: shots.map((shot) => ({
       id: shot.id,
-      hasImage: shot.mediaAssets.some((asset) => asset.assetType === "IMAGE_KEYFRAME" && isReadyAsset(asset)),
+      hasImage: shot.mediaAssets.some((asset) => asset.assetType === "IMAGE_KEYFRAME" && asset.status === "APPROVED"),
       hasVideo: shot.mediaAssets.some((asset) => asset.assetType === "VIDEO_CLIP" && isReadyAsset(asset) && !!asset.localPath),
     })),
     hasFinalVideo: finalAssets.length > 0,
@@ -103,6 +103,8 @@ export async function getEpisodePipelineState(episodeId: string) {
       sceneId: shot.sceneId,
       shotNumber: shot.shotNumber,
       imageReady: shot.mediaAssets.some((asset) => asset.assetType === "IMAGE_KEYFRAME" && isReadyAsset(asset)),
+      imageApproved: shot.mediaAssets.some((asset) => asset.assetType === "IMAGE_KEYFRAME" && asset.status === "APPROVED"),
+      keyframe: shot.mediaAssets.find((asset) => asset.assetType === "IMAGE_KEYFRAME" && isReadyAsset(asset)) || null,
       videoReady: shot.mediaAssets.some((asset) => asset.assetType === "VIDEO_CLIP" && isReadyAsset(asset) && !!asset.localPath),
     })),
     dialogue: dialogueLines.map((line) => ({
@@ -171,6 +173,7 @@ export async function advanceEpisodePipeline(episodeId: string) {
 
   for (const shot of episode.scenes.flatMap((scene) => scene.shots)) {
     const hasImage = shot.mediaAssets.some((asset) => asset.assetType === "IMAGE_KEYFRAME" && isReadyAsset(asset));
+    const hasApprovedImage = shot.mediaAssets.some((asset) => asset.assetType === "IMAGE_KEYFRAME" && asset.status === "APPROVED");
     const readyVideoAssets = shot.mediaAssets.filter((asset) => asset.assetType === "VIDEO_CLIP" && isReadyAsset(asset));
     const hasVideo = readyVideoAssets.some((asset) => !!asset.localPath);
     const hasRemoteOnlyVideo = !hasVideo && readyVideoAssets.length > 0;
@@ -201,7 +204,12 @@ export async function advanceEpisodePipeline(episodeId: string) {
       continue;
     }
 
-    if (hasImage && !hasVideo && !activeVideo) {
+    if (hasImage && !hasApprovedImage && !hasVideo) {
+      blocked.push(`Shot ${shot.id} keyframe is awaiting approval before video generation.`);
+      continue;
+    }
+
+    if (hasApprovedImage && !hasVideo && !activeVideo) {
       const failedVideo = await latestTerminalFailure({ jobType: "VIDEO", shotId: shot.id });
       if (failedVideo) {
         blocked.push(`Shot ${shot.id} has a failed video attempt. Use Regenerate to retry intentionally.`);
@@ -237,6 +245,49 @@ export async function advanceEpisodePipeline(episodeId: string) {
   }
 
   return { actions, blocked, state: await getEpisodePipelineState(episodeId) };
+}
+
+export async function reviewKeyframe(assetId: string, decision: "approve" | "reject") {
+  const asset = await prisma.mediaAsset.findUnique({ where: { id: assetId } });
+  if (!asset || asset.assetType !== "IMAGE_KEYFRAME" || !asset.shotId) {
+    throw new HttpError("Keyframe asset not found.", 404);
+  }
+
+  const activeVideo = await prisma.generationJob.findFirst({
+    where: {
+      shotId: asset.shotId,
+      jobType: "VIDEO",
+      status: { in: ACTIVE_STATUSES },
+    },
+  });
+  if (activeVideo) {
+    throw new HttpError("A video generation is already active for this shot. Wait for it to finish before changing keyframe approval.", 409);
+  }
+
+  if (decision === "approve") {
+    await prisma.$transaction([
+      prisma.mediaAsset.updateMany({
+        where: {
+          shotId: asset.shotId,
+          assetType: "IMAGE_KEYFRAME",
+          status: "APPROVED",
+          id: { not: asset.id },
+        },
+        data: { status: "SUPERSEDED" },
+      }),
+      prisma.mediaAsset.update({
+        where: { id: asset.id },
+        data: { status: "APPROVED" },
+      }),
+    ]);
+  } else {
+    await prisma.mediaAsset.update({
+      where: { id: asset.id },
+      data: { status: "REJECTED" },
+    });
+  }
+
+  return prisma.mediaAsset.findUnique({ where: { id: asset.id } });
 }
 
 export async function reviewFinalVideo(assetId: string, decision: "approve" | "reject") {
