@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { HttpError } from "@/lib/api";
+import { getComfyUiConfig } from "@/lib/comfyui/config";
+import { ComfyUiProvider, getComfyUiStatusSnapshot } from "@/lib/comfyui/provider";
 import { downloadRemoteMedia } from "@/lib/media/download";
+import { getMediaGenerationProvider } from "@/lib/media-generation/config";
 import { episodeMediaDirectory, safeMediaSegment } from "@/lib/media/storage";
 import { prisma } from "@/lib/prisma";
 import { normalizeProviderError } from "@/lib/providers/errors";
@@ -107,7 +110,7 @@ export async function listProductionState(seriesId: string) {
   const series = await prisma.randomRoomsSeries.findUnique({ where: { id: seriesId }, select: { id: true, name: true } });
   if (!series) throw new HttpError("Random Rooms series not found.", 404);
 
-  const [jobs, assets, runPod] = await Promise.all([
+  const [jobs, assets, runPod, comfyUi] = await Promise.all([
     prisma.generationJob.findMany({
       where: { seriesId },
       orderBy: { createdAt: "desc" },
@@ -129,9 +132,10 @@ export async function listProductionState(seriesId: string) {
       },
     }),
     getRunPodStatusSnapshot(false),
+    getComfyUiStatusSnapshot(false),
   ]);
 
-  return { series, runPod, jobs, assets };
+  return { series, mediaGenerationProvider: getMediaGenerationProvider(), runPod, comfyUi, jobs, assets };
 }
 
 async function shotWithPlanning(shotId: string) {
