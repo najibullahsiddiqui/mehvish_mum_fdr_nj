@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { getComfyUiConfig } from "@/lib/comfyui/config";
 import { getRunPodConfig } from "@/lib/runpod/config";
 import { syncGenerationJob } from "@/lib/random-rooms/production-service";
 import { ACTIVE_GENERATION_STATUSES } from "@/lib/random-rooms/generation-safety";
@@ -43,13 +44,17 @@ export async function reapStaleGenerationJobs(now = new Date()) {
   return { staleSubmitting: staleSubmitting.count, expiredLeases: expiredLeases.count };
 }
 
-export async function syncDueRunPodJobs(now = new Date()) {
-  const config = getRunPodConfig();
-  if (!config.enabled || !config.apiKey) return { checked: 0, synced: 0, errors: [] as string[] };
+export async function syncDueExternalJobs(now = new Date()) {
+  const runPod = getRunPodConfig();
+  const comfyUi = getComfyUiConfig();
+  const enabledProviders: string[] = [];
+  if (runPod.enabled && runPod.apiKey) enabledProviders.push("runpod");
+  if (comfyUi.enabled) enabledProviders.push("comfyui");
+  if (!enabledProviders.length) return { checked: 0, synced: 0, errors: [] as string[] };
 
   const jobs = await prisma.generationJob.findMany({
     where: {
-      provider: "runpod",
+      provider: { in: enabledProviders },
       providerJobId: { not: null },
       status: { in: [...ACTIVE_GENERATION_STATUSES] },
       OR: [{ nextPollAt: null }, { nextPollAt: { lte: now } }],
@@ -73,6 +78,6 @@ export async function syncDueRunPodJobs(now = new Date()) {
 
 export async function runGenerationSweep(now = new Date()) {
   const reaped = await reapStaleGenerationJobs(now);
-  const runPod = await syncDueRunPodJobs(now);
-  return { reaped, runPod };
+  const external = await syncDueExternalJobs(now);
+  return { reaped, external };
 }

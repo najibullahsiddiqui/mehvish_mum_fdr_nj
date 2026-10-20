@@ -1,4 +1,6 @@
 import { HttpError } from "@/lib/api";
+import { getComfyUiConfig } from "@/lib/comfyui/config";
+import { getMediaGenerationProvider } from "@/lib/media-generation/config";
 import { prisma } from "@/lib/prisma";
 import { getRenderConfig } from "@/lib/render/config";
 import { renderEpisode } from "@/lib/render/service";
@@ -71,17 +73,27 @@ export async function getEpisodePipelineState(episodeId: string) {
     jobs: jobs.map((job) => ({ jobType: job.jobType, status: job.status })),
   });
 
+  const mediaProvider = getMediaGenerationProvider();
   const runPod = getRunPodConfig();
+  const comfyUi = getComfyUiConfig();
   const tts = getLocalTtsConfig();
   const render = getRenderConfig();
+  const imageCapability =
+    mediaProvider === "comfyui"
+      ? { enabled: comfyUi.enabled, configured: !!comfyUi.imageWorkflowPath, provider: mediaProvider }
+      : { enabled: runPod.enabled, configured: !!runPod.apiKey && !!runPod.imageEndpointId, provider: mediaProvider };
+  const videoCapability =
+    mediaProvider === "comfyui"
+      ? { enabled: comfyUi.enabled, configured: !!comfyUi.videoWorkflowPath, provider: mediaProvider }
+      : { enabled: runPod.enabled, configured: !!runPod.apiKey && !!runPod.videoEndpointId, provider: mediaProvider };
 
   return {
     episode: { id: episode.id, code: episode.code, title: episode.title, status: episode.status },
     summary,
     capabilities: {
       voice: { enabled: tts.enabled },
-      image: { enabled: runPod.enabled, configured: !!runPod.apiKey && !!runPod.imageEndpointId },
-      video: { enabled: runPod.enabled, configured: !!runPod.apiKey && !!runPod.videoEndpointId },
+      image: imageCapability,
+      video: videoCapability,
       render: { enabled: render.enabled },
     },
     finalAsset: finalAssets[0] || null,
@@ -107,8 +119,10 @@ export async function advanceEpisodePipeline(episodeId: string) {
   const actions: string[] = [];
   const blocked: string[] = [];
 
-  const activeRunPodJobs = episode.generationJobs.filter((job) => job.provider === "runpod" && isActiveJob(job) && !!job.providerJobId);
-  for (const job of activeRunPodJobs) {
+  const activeExternalJobs = episode.generationJobs.filter(
+    (job) => ["runpod", "comfyui"].includes(job.provider) && isActiveJob(job) && !!job.providerJobId,
+  );
+  for (const job of activeExternalJobs) {
     try {
       await syncGenerationJob(job.id);
       actions.push(`Synced ${job.jobType.toLowerCase()} job ${job.id}.`);
@@ -143,7 +157,18 @@ export async function advanceEpisodePipeline(episodeId: string) {
   }
 
   episode = await loadEpisode(episodeId);
+  const mediaProvider = getMediaGenerationProvider();
   const runPod = getRunPodConfig();
+  const comfyUi = getComfyUiConfig();
+  const imageReady =
+    mediaProvider === "comfyui"
+      ? comfyUi.enabled && !!comfyUi.imageWorkflowPath
+      : runPod.enabled && !!runPod.apiKey && !!runPod.imageEndpointId;
+  const videoReady =
+    mediaProvider === "comfyui"
+      ? comfyUi.enabled && !!comfyUi.videoWorkflowPath
+      : runPod.enabled && !!runPod.apiKey && !!runPod.videoEndpointId;
+
   for (const shot of episode.scenes.flatMap((scene) => scene.shots)) {
     const hasImage = shot.mediaAssets.some((asset) => asset.assetType === "IMAGE_KEYFRAME" && isReadyAsset(asset));
     const readyVideoAssets = shot.mediaAssets.filter((asset) => asset.assetType === "VIDEO_CLIP" && isReadyAsset(asset));
@@ -158,8 +183,8 @@ export async function advanceEpisodePipeline(episodeId: string) {
         blocked.push(`Shot ${shot.id} has a failed image attempt. Use Regenerate to retry intentionally.`);
         continue;
       }
-      if (!runPod.enabled || !runPod.apiKey || !runPod.imageEndpointId) {
-        blocked.push("RunPod image generation is disabled or not configured.");
+      if (!imageReady) {
+        blocked.push(`${mediaProvider} image generation is disabled or not configured.`);
         break;
       }
       try {
@@ -182,8 +207,8 @@ export async function advanceEpisodePipeline(episodeId: string) {
         blocked.push(`Shot ${shot.id} has a failed video attempt. Use Regenerate to retry intentionally.`);
         continue;
       }
-      if (!runPod.enabled || !runPod.apiKey || !runPod.videoEndpointId) {
-        blocked.push("RunPod video generation is disabled or not configured.");
+      if (!videoReady) {
+        blocked.push(`${mediaProvider} video generation is disabled or not configured.`);
         break;
       }
       try {

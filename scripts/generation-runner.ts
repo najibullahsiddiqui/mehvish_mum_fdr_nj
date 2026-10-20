@@ -8,7 +8,7 @@ async function tick() {
   running = true;
   try {
     const result = await runGenerationSweep();
-    if (result.reaped.staleSubmitting || result.reaped.expiredLeases || result.runPod.synced || result.runPod.errors.length) {
+    if (result.reaped.staleSubmitting || result.reaped.expiredLeases || result.external.synced || result.external.errors.length) {
       console.log("[generation-runner]", JSON.stringify(result));
     }
   } catch (error) {
