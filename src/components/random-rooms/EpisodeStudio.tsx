@@ -27,7 +27,7 @@ import type {
   RandomRoomsSeries,
   RandomRoomsShot,
 } from "@/lib/types";
-import { RANDOM_ROOMS_EPISODE_STATUSES, RANDOM_ROOMS_SCENE_PURPOSES, RANDOM_ROOMS_SCENE_STATUSES, RANDOM_ROOMS_SHOT_STATUSES } from "@/lib/types";
+import { RANDOM_ROOMS_EPISODE_EDITABLE_STATUSES, RANDOM_ROOMS_SCENE_PURPOSES, RANDOM_ROOMS_SCENE_STATUSES, RANDOM_ROOMS_SHOT_STATUSES } from "@/lib/types";
 import { cn, titleCaseStatus } from "@/lib/utils";
 
 type Notice = {
@@ -1063,7 +1063,7 @@ export function EpisodeStudio(props: { randomRooms: DashboardData["randomRooms"]
               <SelectField
                 label="Status"
                 value={episodeForm.status}
-                options={RANDOM_ROOMS_EPISODE_STATUSES.map((status) => ({ value: status, label: titleCaseStatus(status.toLowerCase()) }))}
+                options={RANDOM_ROOMS_EPISODE_EDITABLE_STATUSES.map((status) => ({ value: status, label: titleCaseStatus(status.toLowerCase()) }))}
                 onChange={(status) => setEpisodeForm({ ...episodeForm, status })}
               />
             </div>
