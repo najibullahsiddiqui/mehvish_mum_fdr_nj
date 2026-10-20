@@ -236,20 +236,10 @@ export async function regenerateProductionTarget(input: { stage: "voice" | "imag
     return result;
   }
   if (input.stage === "image") {
-    const result = await submitShotImageJob(input.targetId, { regenerate: true });
-    await prisma.mediaAsset.updateMany({
-      where: { shotId: input.targetId, assetType: "IMAGE_KEYFRAME", status: { in: READY_ASSET_STATUSES } },
-      data: { status: "SUPERSEDED" },
-    });
-    return result;
+    return submitShotImageJob(input.targetId, { regenerate: true });
   }
   if (input.stage === "video") {
-    const result = await submitShotVideoJob(input.targetId, { regenerate: true });
-    await prisma.mediaAsset.updateMany({
-      where: { shotId: input.targetId, assetType: "VIDEO_CLIP", status: { in: READY_ASSET_STATUSES } },
-      data: { status: "SUPERSEDED" },
-    });
-    return result;
+    return submitShotVideoJob(input.targetId, { regenerate: true });
   }
 
   const episode = await prisma.episode.findUnique({ where: { id: input.targetId } });
