@@ -6,6 +6,13 @@ import { promisify } from "node:util";
 import { HttpError } from "@/lib/api";
 import { episodeMediaDirectory, getMediaRoot, safeMediaSegment } from "@/lib/media/storage";
 import { prisma } from "@/lib/prisma";
+import {
+  assertNoActiveGeneration,
+  duplicateGenerationError,
+  generationIdempotencyKey,
+  isUniqueConstraintError,
+  nextGenerationAttempt,
+} from "@/lib/random-rooms/generation-safety";
 import { assertRenderConfigured, getRenderConfig } from "@/lib/render/config";
 import { buildRenderTimeline, captionsToSrt, ffconcatContent } from "@/lib/render/plan";
 
@@ -39,7 +46,7 @@ async function ensureFile(filePath: string, label: string) {
   }
 }
 
-export async function renderEpisode(episodeId: string) {
+export async function renderEpisode(episodeId: string, options: { regenerate?: boolean } = {}) {
   const config = getRenderConfig();
   assertRenderConfigured(config);
 
@@ -58,6 +65,14 @@ export async function renderEpisode(episodeId: string) {
   });
   if (!episode) throw new HttpError("Episode not found.", 404);
   if (!episode.scenes.length) throw new HttpError("Episode has no scenes to render.", 422);
+  if (!options.regenerate) {
+    const existing = await prisma.mediaAsset.findFirst({
+      where: { episodeId: episode.id, assetType: "FINAL_VIDEO", status: { in: RENDERABLE_ASSET_STATUSES } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (existing) throw new HttpError("This episode already has a usable final render. Use regenerate explicitly to create another one.", 409);
+  }
+  await assertNoActiveGeneration({ jobType: "RENDER", episodeId: episode.id });
 
   const missingShots: string[] = [];
   const scenes = episode.scenes.map((scene) => ({
@@ -113,18 +128,37 @@ export async function renderEpisode(episodeId: string) {
   if (timeline.voices.length) args.push("-c:a", "aac", "-b:a", "192k");
   args.push("-movflags", "+faststart", outputPath);
 
-  const job = await prisma.generationJob.create({
-    data: {
-      seriesId: episode.seriesId,
-      episodeId: episode.id,
-      jobType: "RENDER",
-      provider: "local-ffmpeg",
-      model: "ffmpeg",
-      status: "RUNNING",
-      input: { clips: timeline.videoPaths.length, voices: timeline.voices.length, captions: timeline.captions.length, width: config.width, height: config.height, fps: config.fps },
-      startedAt: new Date(),
-    },
-  });
+  const renderInput = {
+    clips: timeline.videoPaths.length,
+    voices: timeline.voices.length,
+    captions: timeline.captions.length,
+    width: config.width,
+    height: config.height,
+    fps: config.fps,
+  };
+  const attempt = options.regenerate ? await nextGenerationAttempt({ jobType: "RENDER", episodeId: episode.id }) : 1;
+  let job;
+  try {
+    job = await prisma.generationJob.create({
+      data: {
+        seriesId: episode.seriesId,
+        episodeId: episode.id,
+        jobType: "RENDER",
+        provider: "local-ffmpeg",
+        model: "ffmpeg",
+        status: "RUNNING",
+        idempotencyKey: generationIdempotencyKey({ jobType: "RENDER", targetId: episode.id, payload: renderInput, attempt }),
+        attempt,
+        maxAttempts: 2,
+        input: renderInput,
+        startedAt: new Date(),
+        leaseUntil: new Date(Date.now() + 25 * 60_000),
+      },
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) throw duplicateGenerationError("RENDER");
+    throw error;
+  }
 
   try {
     await execFileAsync(config.ffmpegPath, args, { timeout: 20 * 60_000, maxBuffer: 10 * 1024 * 1024, windowsHide: true });
@@ -147,11 +181,11 @@ export async function renderEpisode(episodeId: string) {
         metadata: { captions: timeline.captions.length, voices: timeline.voices.length, clips: timeline.videoPaths.length },
       },
     });
-    await prisma.generationJob.update({ where: { id: job.id }, data: { status: "COMPLETED", completedAt: new Date(), output: { assetId: asset.id, localPath: outputPath } } });
+    await prisma.generationJob.update({ where: { id: job.id }, data: { status: "COMPLETED", completedAt: new Date(), leaseUntil: null, nextPollAt: null, output: { assetId: asset.id, localPath: outputPath } } });
     return { jobId: job.id, asset, outputPath };
   } catch (error) {
     const message = error instanceof Error ? error.message.slice(0, 1000) : "FFmpeg render failed.";
-    await prisma.generationJob.update({ where: { id: job.id }, data: { status: "FAILED", errorCode: "RENDER_FAILED", errorMessage: message, completedAt: new Date() } });
+    await prisma.generationJob.update({ where: { id: job.id }, data: { status: "FAILED", errorCode: "RENDER_FAILED", errorMessage: message, completedAt: new Date(), leaseUntil: null, nextPollAt: null } });
     throw new HttpError(`Final render failed: ${message}`, 500);
   }
 }
