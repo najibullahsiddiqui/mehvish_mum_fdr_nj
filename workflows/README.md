@@ -6,7 +6,7 @@ The exact node IDs stay inside the exported JSON. CreatorPilot only replaces exp
 
 ## Keyframe workflow
 
-Set `COMFYUI_IMAGE_WORKFLOW_PATH` to the JSON file path.
+The checked-in baseline is `workflows/creatorpilot_qwen_keyframe_v1.api.json`, adapted from the verified Qwen Image 2.1 Image Edit API export. Set `COMFYUI_IMAGE_WORKFLOW_PATH` to that file (or to a compatible replacement). It treats image 1 as the room/base canvas and image 2 as the primary character reference.
 
 Supported placeholders currently sent by CreatorPilot:
 
@@ -55,3 +55,8 @@ Keep the Pod URL in environment configuration only:
 Do not commit a Pod ID, proxy URL, credentials, or workflow secrets to Git.
 
 Keep `COMFYUI_ENABLED=false` while the Pod is stopped. CreatorPilot will not intentionally call ComfyUI in safe-off mode.
+
+
+### Verified Qwen baseline
+
+The baseline workflow uses Qwen Image 2.1 INT8 with prompt enhancer bypassed, 25 Euler/simple steps, and 1024×1024 output. CreatorPilot replaces the room image, primary character image, prompt, negative prompt, and seed at runtime. Keep the prompt enhancer disabled for the initial production path; it can be evaluated later as an optional quality/cost trade-off.
