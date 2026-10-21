@@ -17,7 +17,7 @@ describe("CreatorPilot Qwen keyframe API workflow", () => {
       PROMPT: "Place Rex in the room.",
       NEGATIVE_PROMPT: "blurry",
       SEED: 42,
-    }) as Record<string, any>;
+    }) as Record<string, { inputs: Record<string, unknown> }>;
 
     expect(hydrated["470"].inputs.image).toBe("creatorpilot/references/room.png");
     expect(hydrated["475"].inputs.image).toBe("creatorpilot/references/rex.png");
