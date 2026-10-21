@@ -31,12 +31,17 @@ export function ReferenceManager(props: {
   const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const query = new URLSearchParams({ ownerType: props.ownerType, ownerId: props.ownerId });
-    setAssets(await jsonRequest<ReferenceAsset[]>(`/api/random-rooms/references?${query}`));
+    try {
+      const query = new URLSearchParams({ ownerType: props.ownerType, ownerId: props.ownerId });
+      const nextAssets = await jsonRequest<ReferenceAsset[]>(`/api/random-rooms/references?${query}`);
+      setAssets(nextAssets);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not load references.");
+    }
   }, [props.ownerId, props.ownerType]);
 
   useEffect(() => {
-    void load().catch((error) => setNotice(error instanceof Error ? error.message : "Could not load references."));
+    void load();
   }, [load]);
 
   async function upload(file: File | null) {

@@ -9,6 +9,7 @@ import { getMediaGenerationProvider } from "@/lib/media-generation/config";
 import { episodeMediaDirectory, safeMediaSegment } from "@/lib/media/storage";
 import { prisma } from "@/lib/prisma";
 import { normalizeProviderError } from "@/lib/providers/errors";
+import { composeQwenKeyframePrompt, validateQwenKeyframeReferences } from "@/lib/random-rooms/keyframe-planning";
 import {
   assertNoActiveGeneration,
   duplicateGenerationError,
@@ -150,7 +151,7 @@ async function shotWithPlanning(shotId: string) {
             },
           },
           room: true,
-          dialogueLines: { select: { characterId: true } },
+          dialogueLines: { select: { characterId: true, shotId: true } },
         },
       },
     },
@@ -160,9 +161,20 @@ async function shotWithPlanning(shotId: string) {
 }
 
 async function primaryReferenceAssetsForShot(shot: Awaited<ReturnType<typeof shotWithPlanning>>) {
-  const dialogueCharacterIds = [...new Set(shot.scene.dialogueLines.map((line) => line.characterId))];
-  const fallbackCharacterIds = shot.scene.episode.characterAssignments.map((assignment) => assignment.characterId);
-  const characterIds = dialogueCharacterIds.length ? dialogueCharacterIds : fallbackCharacterIds;
+  const shotDialogueCharacterIds = [
+    ...new Set(
+      shot.scene.dialogueLines
+        .filter((line) => line.shotId === shot.id)
+        .map((line) => line.characterId),
+    ),
+  ];
+  const sceneDialogueCharacterIds = [...new Set(shot.scene.dialogueLines.map((line) => line.characterId))];
+  const assignmentCharacterIds = shot.scene.episode.characterAssignments.map((assignment) => assignment.characterId);
+  const characterIds = shotDialogueCharacterIds.length
+    ? shotDialogueCharacterIds
+    : sceneDialogueCharacterIds.length
+      ? sceneDialogueCharacterIds
+      : assignmentCharacterIds;
 
   const [characters, room] = await Promise.all([
     prisma.mediaAsset.findMany({
@@ -173,7 +185,7 @@ async function primaryReferenceAssetsForShot(shot: Awaited<ReturnType<typeof sho
         status: { in: ["READY", "APPROVED"] },
         localPath: { not: null },
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ characterId: "asc" }, { createdAt: "desc" }],
     }),
     shot.scene.roomId
       ? prisma.mediaAsset.findFirst({
@@ -189,7 +201,12 @@ async function primaryReferenceAssetsForShot(shot: Awaited<ReturnType<typeof sho
       : null,
   ]);
 
-  return { characters, room };
+  const byCharacterId = new Map(characters.map((asset) => [asset.characterId, asset]));
+  const orderedCharacters = characterIds
+    .map((characterId) => byCharacterId.get(characterId) || null)
+    .filter((asset): asset is NonNullable<typeof asset> => !!asset);
+
+  return { characters: orderedCharacters, room };
 }
 
 export async function submitShotImageJob(shotId: string, options: { regenerate?: boolean } = {}) {
@@ -210,9 +227,29 @@ export async function submitShotImageJob(shotId: string, options: { regenerate?:
   const providerName = getMediaGenerationProvider();
 
   const references = await primaryReferenceAssetsForShot(shot);
+  const keyframePrompt = composeQwenKeyframePrompt({
+    shotPrompt: shot.imagePrompt,
+    visualDescription: shot.visualDescription,
+    cameraFraming: shot.cameraFraming,
+    continuityNotes: shot.continuityNotes,
+  });
+
+  if (providerName === "comfyui") {
+    const missingReferences = validateQwenKeyframeReferences({
+      roomReferencePath: references.room?.localPath,
+      characterReferencePath: references.characters[0]?.localPath,
+    });
+    if (missingReferences.length) {
+      throw new HttpError(
+        `Qwen keyframe generation requires ${missingReferences.join(" and ")} before GPU submission.`,
+        422,
+      );
+    }
+  }
+
   const input = {
-    task: "text_to_image",
-    prompt: shot.imagePrompt,
+    task: "reference_image_edit",
+    prompt: keyframePrompt,
     visual_description: shot.visualDescription,
     aspect_ratio: episode.targetAspectRatio,
     camera_framing: shot.cameraFraming,
@@ -267,12 +304,12 @@ export async function submitShotImageJob(shotId: string, options: { regenerate?:
     if (providerName === "comfyui") {
       const comfyConfig = getComfyUiConfig();
       const referenceUploads: Array<{ bytes: Uint8Array; filename: string; variablePrefix: string }> = [];
-      for (const [index, asset] of references.characters.entries()) {
-        if (!asset.localPath) continue;
+      const primaryCharacter = references.characters[0];
+      if (primaryCharacter?.localPath) {
         referenceUploads.push({
-          bytes: await readFile(asset.localPath),
-          filename: path.basename(asset.localPath),
-          variablePrefix: `CHARACTER_REFERENCE_${index + 1}`,
+          bytes: await readFile(primaryCharacter.localPath),
+          filename: path.basename(primaryCharacter.localPath),
+          variablePrefix: "CHARACTER_REFERENCE_1",
         });
       }
       if (references.room?.localPath) {
@@ -283,14 +320,14 @@ export async function submitShotImageJob(shotId: string, options: { regenerate?:
         });
       }
       const submitted = await new ComfyUiProvider().submitImage({
-        PROMPT: shot.imagePrompt,
+        PROMPT: keyframePrompt,
         NEGATIVE_PROMPT: comfyConfig.defaultNegativePrompt,
         VISUAL_DESCRIPTION: shot.visualDescription,
         ASPECT_RATIO: episode.targetAspectRatio,
         CAMERA_FRAMING: shot.cameraFraming,
         CONTINUITY_NOTES: shot.continuityNotes || "",
         SEED: attempt,
-        CHARACTER_REFERENCE_COUNT: references.characters.length,
+        CHARACTER_REFERENCE_COUNT: references.characters[0] ? 1 : 0,
         HAS_ROOM_REFERENCE: !!references.room,
       }, referenceUploads);
       return prisma.generationJob.update({
